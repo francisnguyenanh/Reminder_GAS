@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <title>Cấu hình Gửi Tin Nhắn Google Chat</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <style>
+      body { background-color: #f8f9fa; padding: 20px; }
+      .container-fluid { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+      .spinner-border { display: none; margin-left: 10px; }
+      .table-action-btn { background: none; border: none; padding: 5px; }
+    </style>
+  </head>
+  <body>
+    <!-- Navbar hiển thị user email -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h3 class="text-primary m-0"><i class="bi bi-chat-dots-fill"></i> Quản Lý Nhắc Lịch Google Chat</h3>
+      <div class="badge bg-secondary p-2 px-3">
+        <i class="bi bi-person-circle"></i> Đang đăng nhập: <span id="currentUserEmail">Đang tải...</span>
+      </div>
+    </div>
+
+    <div class="container-fluid">
+      <div id="alertBox" class="alert d-none" role="alert"></div>
+
+      <div class="row">
+        <!-- FORM CỘT TRÁI -->
+        <div class="col-md-4 border-end pe-4">
+          <h5 class="mb-3" id="formTitle">Tạo Mới Lịch Nhắc</h5>
+          <form id="configForm" onsubmit="handleFormSubmit(event)">
+            <!-- Hidden ID Field cho mục Update -->
+            <input type="hidden" id="configId">
+
+            <div class="mb-3">
+              <label for="title" class="form-label fw-bold">Tiêu đề</label>
+              <input type="text" class="form-control form-control-sm" id="title" required placeholder="Nhắc họp...">
+            </div>
+            
+            <div class="mb-3">
+              <label for="webhookUrl" class="form-label fw-bold">Webhook URL</label>
+              <input type="url" class="form-control form-control-sm" id="webhookUrl" required placeholder="https://chat.googleapis.com/...">
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-bold">Các thứ trong tuần</label>
+              <div class="d-flex flex-wrap gap-2" style="font-size: 0.9rem;">
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Monday" id="d2"><label class="form-check-label" for="d2">T2</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Tuesday" id="d3"><label class="form-check-label" for="d3">T3</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Wednesday" id="d4"><label class="form-check-label" for="d4">T4</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Thursday" id="d5"><label class="form-check-label" for="d5">T5</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Friday" id="d6"><label class="form-check-label" for="d6">T6</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Saturday" id="d7"><label class="form-check-label" for="d7">T7</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Sunday" id="d1"><label class="form-check-label" for="d1">CN</label></div>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label for="time" class="form-label fw-bold">Giờ (HH:mm)</label>
+              <input type="time" class="form-control form-control-sm" id="time" required>
+            </div>
+
+            <div class="mb-3">
+              <label for="message" class="form-label fw-bold">Nội dung</label>
+              <textarea class="form-control form-control-sm" id="message" rows="3" required></textarea>
+            </div>
+
+            <div class="d-flex gap-2">
+              <button type="submit" class="btn btn-primary w-100" id="submitBtn">
+                <i class="bi bi-floppy"></i> Lưu
+                <span class="spinner-border spinner-border-sm" id="spinnerSubmit"></span>
+              </button>
+              <button type="button" class="btn btn-secondary d-none" id="cancelBtn" onclick="resetForm()">
+                Hủy Sửa
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- TABLE CỘT PHẢI -->
+        <div class="col-md-8 ps-4">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="m-0">Danh Sách Lịch Nhắc</h5>
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadTableData()">
+              <i class="bi bi-arrow-clockwise"></i> Làm mới
+            </button>
+          </div>
+          
+          <div class="table-responsive">
+            <table class="table table-hover table-bordered align-middle" style="font-size: 0.9rem;">
+              <thead class="table-light">
+                <tr>
+                  <th>Tiêu đề</th>
+                  <th>Lịch gửi</th>
+                  <th>Tạo bởi</th>
+                  <th class="text-center" width="100">Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="4" class="text-center py-4">Đang tải dữ liệu... <div class="spinner-border spinner-border-sm text-primary" style="display:inline-block"></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bundle CSS/JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+      let currentConfigs = []; // Lưu state dữ liệu
+
+      // Khởi chạy khi load trang
+      document.addEventListener("DOMContentLoaded", function() {
+        loadTableData();
+      });
+
+      // Lấy dữ liệu Table từ GS
+      function loadTableData() {
+        document.getElementById('tableBody').innerHTML = '<tr><td colspan="4" class="text-center py-4">Đang tải dữ liệu... <div class="spinner-border spinner-border-sm text-primary" style="display:inline-block"></div></td></tr>';
+        
+        google.script.run
+          .withSuccessHandler(function(res) {
+            currentConfigs = res.configs;
+            document.getElementById('currentUserEmail').textContent = res.currentUser || "Khách (Test offline)";
+            renderTable(res.configs);
+            // Khởi tạo tooltips
+            const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+            [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+          })
+          .withFailureHandler(function(err) {
+            showAlert('Lỗi tải dữ liệu: ' + err.message, 'danger');
+          })
+          .getConfigs();
+      }
+
+      // Vẽ Table
+      function renderTable(data) {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+        
+        if (data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có lịch nhắc nào thiết lập.</td></tr>';
+          return;
+        }
+
+        data.forEach(item => {
+          // Tooltip hiện thông tin Modified
+          const modifiedInfo = item.lastModifiedBy ? `Sửa lần cuối: ${item.lastModifiedAt} bởi ${item.lastModifiedBy}` : `Tạo lúc: ${item.createdAt}`;
+          
+          // Action Buttons: disable nếu không có quyền canEdit
+          const actionButtons = item.canEdit ? `
+              <button class="table-action-btn text-primary" onclick="editConfig('${item.id}')" title="Sửa"><i class="bi bi-pencil-square"></i></button>
+              <button class="table-action-btn text-danger ms-1" onclick="deleteConfigPrompt('${item.id}')" title="Xóa"><i class="bi bi-trash"></i></button>
+            ` : `<span class="badge bg-light text-muted"><i class="bi bi-shield-lock"></i> Chỉ đọc</span>`;
+
+          const tr = `
+            <tr>
+              <td>
+                <span class="fw-bold">${item.title}</span><br>
+                <small class="text-muted text-truncate d-inline-block" style="max-width: 250px;">${item.webhookUrl}</small>
+              </td>
+              <td>
+                <span class="badge bg-info text-dark">${item.time}</span><br>
+                <small class="text-muted">${item.days}</small>
+              </td>
+              <td>
+                <div class="d-flex align-items-center gap-1" data-bs-toggle="tooltip" data-bs-placement="top" title="${modifiedInfo}">
+                  <span>${item.createdBy || 'Anonymous'}</span>
+                  <i class="bi bi-info-circle text-primary" style="font-size: 0.8rem; cursor:help;"></i>
+                </div>
+              </td>
+              <td class="text-center">${actionButtons}</td>
+            </tr>
+          `;
+          tbody.insertAdjacentHTML('beforeend', tr);
+        });
+      }
+
+      // Form Submit - Create / Update
+      function handleFormSubmit(event) {
+        event.preventDefault();
+        
+        const checkboxes = document.querySelectorAll('.day-cb:checked');
+        const days = Array.from(checkboxes).map(cb => cb.value);
+        if (days.length === 0) {
+          showAlert('Vui lòng chọn ít nhất một ngày!', 'danger'); return;
+        }
+
+        const data = {
+          id: document.getElementById('configId').value,
+          title: document.getElementById('title').value.trim(),
+          webhookUrl: document.getElementById('webhookUrl').value.trim(),
+          days: days,
+          time: document.getElementById('time').value,
+          message: document.getElementById('message').value.trim()
+        };
+
+        const btn = document.getElementById('submitBtn');
+        const spinner = document.getElementById('spinnerSubmit');
+        btn.disabled = true; spinner.style.display = 'inline-block';
+        showAlert('Đang lưu dữ liệu...', 'info');
+
+        google.script.run
+          .withSuccessHandler(function(response) {
+            btn.disabled = false; spinner.style.display = 'none';
+            if (response.success) {
+              showAlert(response.message, 'success');
+              resetForm();
+              loadTableData(); // Reload Table
+            } else {
+              showAlert(response.message, 'danger');
+            }
+          })
+          .withFailureHandler(function(err) {
+            btn.disabled = false; spinner.style.display = 'none';
+            showAlert('Lỗi kết nối: ' + err.message, 'danger');
+          })
+          .upsertRemind(data);
+      }
+
+      // Xóa bản ghi
+      function deleteConfigPrompt(id) {
+        if (!confirm('Bạn có chắc chắn muốn xóa lịch nhắc này? Thao tác không thể hoàn tác.')) return;
+        
+        showAlert('Đang xóa bản ghi...', 'warning');
+        google.script.run
+          .withSuccessHandler(function(res) {
+            if (res.success) {
+              showAlert(res.message, 'success');
+              loadTableData();
+            } else {
+              showAlert(res.message, 'danger');
+            }
+          })
+          .withFailureHandler(function(err) {
+            showAlert('Lỗi kết nối: ' + err.message, 'danger');
+          })
+          .deleteConfig(id);
+      }
+
+      // Nhấn Edit -> Fill dữ liệu lên Form
+      function editConfig(id) {
+        const item = currentConfigs.find(c => c.id === id);
+        if (!item) return;
+
+        document.getElementById('configId').value = item.id;
+        document.getElementById('title').value = item.title;
+        document.getElementById('webhookUrl').value = item.webhookUrl;
+        document.getElementById('time').value = item.time;
+        document.getElementById('message').value = item.message;
+        
+        // Reset checkboxes then check matched days
+        document.querySelectorAll('.day-cb').forEach(cb => cb.checked = false);
+        const savedDays = item.days.split(', ').map(d => d.trim());
+        document.querySelectorAll('.day-cb').forEach(cb => {
+            if (savedDays.includes(cb.value)) cb.checked = true;
+        });
+
+        // Chuyển UI Form sang Edit Mode
+        document.getElementById('formTitle').textContent = `Sửa Lịch Nhắc: ${item.title}`;
+        document.getElementById('cancelBtn').classList.remove('d-none');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      // Reset Form về Create Mode
+      function resetForm() {
+        document.getElementById('configForm').reset();
+        document.getElementById('configId').value = '';
+        document.getElementById('formTitle').textContent = 'Tạo Mới Lịch Nhắc';
+        document.getElementById('cancelBtn').classList.add('d-none');
+      }
+
+      // Hàm hiển thị Alert
+      function showAlert(message, type) {
+        const alertBox = document.getElementById('alertBox');
+        alertBox.className = `alert alert-${type}`;
+        alertBox.textContent = message;
+      }
+    </script>
+  </body>
+</html>
