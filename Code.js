@@ -41,42 +41,45 @@ function getConfigs() {
   try {
     const sheet = setupSheet();
     const data = sheet.getDataRange().getValues();
-    const currentUser = getUserInfo();
+    const currentUser = getUserInfo() || ""; // 空の場合は空文字を保証
     const configs = [];
+    
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       if (!row[0]) continue;
+      
       const createdBy = row[7];
       const canEdit = (createdBy === currentUser) || (currentUser === '');
+
+      // 日付オブジェクトを文字列に安全に変換する補助関数
+      const formatSafeDate = (val) => {
+        if (val instanceof Date) {
+          return Utilities.formatDate(val, 'GMT+7', 'yyyy/MM/dd HH:mm:ss');
+        }
+        return val ? String(val) : "";
+      };
+
       configs.push({
         id: row[0],
         title: row[1],
         webhookUrl: row[2],
         days: row[3],
-        time: (typeof row[4] === 'object' && row[4] instanceof Date)
-          ? Utilities.formatDate(row[4], 'GMT+7', 'HH:mm')
-          : row[4],
+        time: (row[4] instanceof Date) ? Utilities.formatDate(row[4], 'GMT+7', 'HH:mm') : String(row[4]),
         message: row[5],
         status: row[6],
         createdBy: createdBy,
-        createdAt: row[8],
+        createdAt: formatSafeDate(row[8]),      // 文字列変換を徹底
         lastModifiedBy: row[9],
-        lastModifiedAt: row[10],
+        lastModifiedAt: formatSafeDate(row[10]), // 文字列変換を徹底
         canEdit: canEdit
       });
     }
-    Logger.log({ configs, currentUser });
     return {
       configs: configs,
       currentUser: currentUser
     };
   } catch (e) {
-    Logger.log('getConfigs ERROR: ' + e);
-    return {
-      configs: [],
-      currentUser: '',
-      errorMessage: 'getConfigs ERROR: ' + e
-    };
+    return { configs: [], currentUser: '', errorMessage: e.toString() };
   }
 }
 
