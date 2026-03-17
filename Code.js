@@ -38,40 +38,46 @@ function setupSheet() {
  * API Lấy danh sách cấu hình
  */
 function getConfigs() {
-  const sheet = setupSheet();
-  const data = sheet.getDataRange().getValues();
-  const currentUser = getUserInfo();
-  const configs = [];
-  
-  // Bỏ qua dòng Header (i = 1)
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    if (!row[0]) continue; // Bỏ qua nếu không có ID
-    
-    const createdBy = row[7];
-    // Quyền: Có thể sửa/xóa nếu là người tạo, hoặc chạy dưới dạng anonymous (rỗng) trong lúc test
-    const canEdit = (createdBy === currentUser) || (currentUser === '');
-    
-    configs.push({
-      id: row[0],
-      title: row[1],
-      webhookUrl: row[2],
-      days: row[3],
-      time: row[4],
-      message: row[5],
-      status: row[6],
-      createdBy: createdBy,
-      createdAt: row[8],
-      lastModifiedBy: row[9],
-      lastModifiedAt: row[10],
-      canEdit: canEdit
-    });
+  try {
+    const sheet = setupSheet();
+    const data = sheet.getDataRange().getValues();
+    const currentUser = getUserInfo();
+    const configs = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row[0]) continue;
+      const createdBy = row[7];
+      const canEdit = (createdBy === currentUser) || (currentUser === '');
+      configs.push({
+        id: row[0],
+        title: row[1],
+        webhookUrl: row[2],
+        days: row[3],
+        time: (typeof row[4] === 'object' && row[4] instanceof Date)
+          ? Utilities.formatDate(row[4], 'GMT+7', 'HH:mm')
+          : row[4],
+        message: row[5],
+        status: row[6],
+        createdBy: createdBy,
+        createdAt: row[8],
+        lastModifiedBy: row[9],
+        lastModifiedAt: row[10],
+        canEdit: canEdit
+      });
+    }
+    Logger.log({ configs, currentUser });
+    return {
+      configs: configs,
+      currentUser: currentUser
+    };
+  } catch (e) {
+    Logger.log('getConfigs ERROR: ' + e);
+    return {
+      configs: [],
+      currentUser: '',
+      errorMessage: 'getConfigs ERROR: ' + e
+    };
   }
-  
-  return {
-    configs: configs,
-    currentUser: currentUser
-  };
 }
 
 /**

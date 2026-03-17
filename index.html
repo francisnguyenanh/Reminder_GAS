@@ -3,7 +3,7 @@
   <head>
     <base target="_top">
     <meta charset="utf-8">
-    <title>Cấu hình Gửi Tin Nhắn Google Chat</title>
+    <title>Google Chatリマインダー設定</title>
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Bootstrap Icons -->
@@ -18,9 +18,9 @@
   <body>
     <!-- Navbar hiển thị user email -->
     <div class="d-flex justify-content-between align-items-center mb-3">
-      <h3 class="text-primary m-0"><i class="bi bi-chat-dots-fill"></i> Quản Lý Nhắc Lịch Google Chat</h3>
+      <h3 class="text-primary m-0"><i class="bi bi-chat-dots-fill"></i> Google Chatリマインダー管理</h3>
       <div class="badge bg-secondary p-2 px-3">
-        <i class="bi bi-person-circle"></i> Đang đăng nhập: <span id="currentUserEmail">Đang tải...</span>
+        <i class="bi bi-person-circle"></i> ログイン中：<span id="currentUserEmail">読み込み中...</span>
       </div>
     </div>
 
@@ -30,14 +30,14 @@
       <div class="row">
         <!-- FORM CỘT TRÁI -->
         <div class="col-md-4 border-end pe-4">
-          <h5 class="mb-3" id="formTitle">Tạo Mới Lịch Nhắc</h5>
+          <h5 class="mb-3" id="formTitle">新しいリマインダーを作成</h5>
           <form id="configForm" onsubmit="handleFormSubmit(event)">
             <!-- Hidden ID Field cho mục Update -->
             <input type="hidden" id="configId">
 
             <div class="mb-3">
-              <label for="title" class="form-label fw-bold">Tiêu đề</label>
-              <input type="text" class="form-control form-control-sm" id="title" required placeholder="Nhắc họp...">
+              <label for="title" class="form-label fw-bold">タイトル</label>
+              <input type="text" class="form-control form-control-sm" id="title" required placeholder="会議リマインダー...">
             </div>
             
             <div class="mb-3">
@@ -46,35 +46,35 @@
             </div>
 
             <div class="mb-3">
-              <label class="form-label fw-bold">Các thứ trong tuần</label>
+              <label class="form-label fw-bold">曜日</label>
               <div class="d-flex flex-wrap gap-2" style="font-size: 0.9rem;">
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Monday" id="d2"><label class="form-check-label" for="d2">T2</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Tuesday" id="d3"><label class="form-check-label" for="d3">T3</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Wednesday" id="d4"><label class="form-check-label" for="d4">T4</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Thursday" id="d5"><label class="form-check-label" for="d5">T5</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Friday" id="d6"><label class="form-check-label" for="d6">T6</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Saturday" id="d7"><label class="form-check-label" for="d7">T7</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Sunday" id="d1"><label class="form-check-label" for="d1">CN</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Monday" id="d2"><label class="form-check-label" for="d2">月</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Tuesday" id="d3"><label class="form-check-label" for="d3">火</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Wednesday" id="d4"><label class="form-check-label" for="d4">水</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Thursday" id="d5"><label class="form-check-label" for="d5">木</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Friday" id="d6"><label class="form-check-label" for="d6">金</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Saturday" id="d7"><label class="form-check-label" for="d7">土</label></div>
+                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Sunday" id="d1"><label class="form-check-label" for="d1">日</label></div>
               </div>
             </div>
 
             <div class="mb-3">
-              <label for="time" class="form-label fw-bold">Giờ (HH:mm)</label>
+              <label for="time" class="form-label fw-bold">時刻 (HH:mm)</label>
               <input type="time" class="form-control form-control-sm" id="time" required>
             </div>
 
             <div class="mb-3">
-              <label for="message" class="form-label fw-bold">Nội dung</label>
+              <label for="message" class="form-label fw-bold">内容</label>
               <textarea class="form-control form-control-sm" id="message" rows="3" required></textarea>
             </div>
 
             <div class="d-flex gap-2">
               <button type="submit" class="btn btn-primary w-100" id="submitBtn">
-                <i class="bi bi-floppy"></i> Lưu
+                <i class="bi bi-floppy"></i> 保存
                 <span class="spinner-border spinner-border-sm" id="spinnerSubmit"></span>
               </button>
               <button type="button" class="btn btn-secondary d-none" id="cancelBtn" onclick="resetForm()">
-                Hủy Sửa
+                キャンセル
               </button>
             </div>
           </form>
@@ -121,19 +121,33 @@
 
       // Lấy dữ liệu Table từ GS
       function loadTableData() {
-        document.getElementById('tableBody').innerHTML = '<tr><td colspan="4" class="text-center py-4">Đang tải dữ liệu... <div class="spinner-border spinner-border-sm text-primary" style="display:inline-block"></div></td></tr>';
-        
+        document.getElementById('tableBody').innerHTML = '<tr><td colspan="4" class="text-center py-4">データを読み込み中... <div class="spinner-border spinner-border-sm text-primary" style="display:inline-block"></div></td></tr>';
+
         google.script.run
           .withSuccessHandler(function(res) {
+            // Defensive: check res and res.configs
+            if (!res || !Array.isArray(res.configs)) {
+              let msg = 'データ取得エラー: サーバーから不正なデータが返されました。';
+              if (res && res.errorMessage) {
+                msg += '<br><b>Server error:</b> ' + res.errorMessage;
+                console.error('getConfigs errorMessage:', res.errorMessage);
+              }
+              console.error('Invalid response from getConfigs:', res);
+              showAlert(msg, 'danger');
+              document.getElementById('tableBody').innerHTML = '<tr><td colspan="4" class="text-center text-danger">データ取得エラー</td></tr>';
+              return;
+            }
             currentConfigs = res.configs;
-            document.getElementById('currentUserEmail').textContent = res.currentUser || "Khách (Test offline)";
+            document.getElementById('currentUserEmail').textContent = res.currentUser || "ゲスト（オフラインテスト）";
             renderTable(res.configs);
             // Khởi tạo tooltips
             const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
             [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
           })
           .withFailureHandler(function(err) {
-            showAlert('Lỗi tải dữ liệu: ' + err.message, 'danger');
+            showAlert('Lỗi tải dữ liệu: ' + (err && err.message ? err.message : err), 'danger');
+            document.getElementById('tableBody').innerHTML = '<tr><td colspan="4" class="text-center text-danger">データ取得エラー</td></tr>';
+            console.error('getConfigs failed:', err);
           })
           .getConfigs();
       }
@@ -144,19 +158,19 @@
         tbody.innerHTML = '';
         
         if (data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có lịch nhắc nào thiết lập.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">リマインダーが設定されていません。</td></tr>';
           return;
         }
 
         data.forEach(item => {
           // Tooltip hiện thông tin Modified
-          const modifiedInfo = item.lastModifiedBy ? `Sửa lần cuối: ${item.lastModifiedAt} bởi ${item.lastModifiedBy}` : `Tạo lúc: ${item.createdAt}`;
+          const modifiedInfo = item.lastModifiedBy ? `最終更新: ${item.lastModifiedAt}（${item.lastModifiedBy}）` : `作成日時: ${item.createdAt}`;
           
           // Action Buttons: disable nếu không có quyền canEdit
           const actionButtons = item.canEdit ? `
-              <button class="table-action-btn text-primary" onclick="editConfig('${item.id}')" title="Sửa"><i class="bi bi-pencil-square"></i></button>
-              <button class="table-action-btn text-danger ms-1" onclick="deleteConfigPrompt('${item.id}')" title="Xóa"><i class="bi bi-trash"></i></button>
-            ` : `<span class="badge bg-light text-muted"><i class="bi bi-shield-lock"></i> Chỉ đọc</span>`;
+              <button class="table-action-btn text-primary" onclick="editConfig('${item.id}')" title="編集"><i class="bi bi-pencil-square"></i></button>
+              <button class="table-action-btn text-danger ms-1" onclick="deleteConfigPrompt('${item.id}')" title="削除"><i class="bi bi-trash"></i></button>
+            ` : `<span class="badge bg-light text-muted"><i class="bi bi-shield-lock"></i> 閲覧のみ</span>`;
 
           const tr = `
             <tr>
@@ -188,7 +202,7 @@
         const checkboxes = document.querySelectorAll('.day-cb:checked');
         const days = Array.from(checkboxes).map(cb => cb.value);
         if (days.length === 0) {
-          showAlert('Vui lòng chọn ít nhất một ngày!', 'danger'); return;
+          showAlert('少なくとも1つの曜日を選択してください！', 'danger'); return;
         }
 
         const data = {
@@ -203,7 +217,7 @@
         const btn = document.getElementById('submitBtn');
         const spinner = document.getElementById('spinnerSubmit');
         btn.disabled = true; spinner.style.display = 'inline-block';
-        showAlert('Đang lưu dữ liệu...', 'info');
+        showAlert('データを保存中...', 'info');
 
         google.script.run
           .withSuccessHandler(function(response) {
@@ -225,9 +239,9 @@
 
       // Xóa bản ghi
       function deleteConfigPrompt(id) {
-        if (!confirm('Bạn có chắc chắn muốn xóa lịch nhắc này? Thao tác không thể hoàn tác.')) return;
+        if (!confirm('本当にこのリマインダーを削除しますか？この操作は元に戻せません。')) return;
         
-        showAlert('Đang xóa bản ghi...', 'warning');
+        showAlert('削除中...', 'warning');
         google.script.run
           .withSuccessHandler(function(res) {
             if (res.success) {
@@ -262,7 +276,7 @@
         });
 
         // Chuyển UI Form sang Edit Mode
-        document.getElementById('formTitle').textContent = `Sửa Lịch Nhắc: ${item.title}`;
+        document.getElementById('formTitle').textContent = `リマインダーを編集: ${item.title}`;
         document.getElementById('cancelBtn').classList.remove('d-none');
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -271,7 +285,7 @@
       function resetForm() {
         document.getElementById('configForm').reset();
         document.getElementById('configId').value = '';
-        document.getElementById('formTitle').textContent = 'Tạo Mới Lịch Nhắc';
+        document.getElementById('formTitle').textContent = '新しいリマインダーを作成';
         document.getElementById('cancelBtn').classList.add('d-none');
       }
 
