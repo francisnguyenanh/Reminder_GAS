@@ -26,12 +26,9 @@ function setupSheet() {
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME);
-    sheet.appendRow([
-      'ID', 'タイトル', 'Webhook URL', '曜日', '時刻', '内容', '状態',
-      'CreatedBy', 'CreatedAt', 'LastModifiedBy', 'LastModifiedAt',
-      'RecurrenceType', 'EndDate'
-    ]);
-    sheet.getRange('A1:M1').setFontWeight('bold');
+    // Tiêu đề cột mới kèm Tracking
+    sheet.appendRow(['ID', 'Tiêu đề', 'Webhook URL', 'Các thứ trong tuần', 'Giờ gửi', 'Nội dung tin nhắn', 'Trạng thái', 'CreatedBy', 'CreatedAt', 'LastModifiedBy', 'LastModifiedAt']);
+    sheet.getRange("A1:K1").setFontWeight("bold");
     sheet.setFrozenRows(1);
   }
   return sheet;
@@ -44,39 +41,45 @@ function getConfigs() {
   try {
     const sheet = setupSheet();
     const data = sheet.getDataRange().getValues();
-    const currentUser = getUserInfo();
-    if (!currentUser) {
-      return { success: true, configs: [], currentUser: '', warning: 'ログインが必要です。' };
-    }
+    const currentUser = getUserInfo() || ""; // 空の場合は空文字を保証
     const configs = [];
+    
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       if (!row[0]) continue;
+      
       const createdBy = row[7];
-      if (createdBy !== currentUser) continue; // user-scoped
+      const canEdit = (createdBy === currentUser) || (currentUser === '');
+
+      // 日付オブジェクトを文字列に安全に変換する補助関数
       const formatSafeDate = (val) => {
-        if (val instanceof Date) return Utilities.formatDate(val, 'GMT+9', 'yyyy/MM/dd HH:mm:ss');
-        return val ? String(val) : '';
+        if (val instanceof Date) {
+          return Utilities.formatDate(val, 'GMT+9', 'yyyy/MM/dd HH:mm:ss');
+        }
+        return val ? String(val) : "";
       };
+
       configs.push({
         id: row[0],
         title: row[1],
         webhookUrl: row[2],
         days: row[3],
-        time: (row[4] instanceof Date) ? Utilities.formatDate(row[4], 'GMT+9', 'HH:mm') : String(row[4] || ''),
+        time: (row[4] instanceof Date) ? Utilities.formatDate(row[4], 'GMT+9', 'HH:mm') : String(row[4]),
         message: row[5],
         status: row[6],
         createdBy: createdBy,
-        createdAt: formatSafeDate(row[8]),
+        createdAt: formatSafeDate(row[8]),      // 文字列変換を徹底
         lastModifiedBy: row[9],
-        lastModifiedAt: formatSafeDate(row[10]),
-        recurrenceType: row[11] || 'recurring',
-        endDate: row[12] || ''
+        lastModifiedAt: formatSafeDate(row[10]), // 文字列変換を徹底
+        canEdit: canEdit
       });
     }
-    return { success: true, configs: configs, currentUser: currentUser };
+    return {
+      configs: configs,
+      currentUser: currentUser
+    };
   } catch (e) {
-    return { success: false, configs: [], currentUser: '', errorMessage: e.toString() };
+    return { configs: [], currentUser: '', errorMessage: e.toString() };
   }
 }
 
@@ -88,52 +91,55 @@ function upsertRemind(formData) {
   try {
     const sheet = setupSheet();
     const email = getUserInfo();
-    const nowTime = Utilities.formatDate(new Date(), 'GMT+9', 'yyyy/MM/dd HH:mm:ss');
-    const daysString = Array.isArray(formData.days) ? formData.days.join(', ') : formData.days;
+    const nowTime = Utilities.formatDate(new Date(), "GMT+9", "dd/MM/yyyy HH:mm:ss");
+    const daysString = formData.days.join(', ');
     const data = sheet.getDataRange().getValues();
+    
     if (formData.id) {
+      // Logic Sửa (Update)
       for (let i = 1; i < data.length; i++) {
         if (data[i][0] === formData.id) {
           const createdBy = data[i][7];
           if (createdBy !== email && email !== '') {
-            return { success: false, message: '編集権限がありません。' };
+            return { success: false, message: 'Bạn không có quyền sửa bản ghi này!' };
           }
+          
+          // Row theo sheet = index i + 1 (vì mảng JS từ 0)
           const rowNum = i + 1;
-          // Cols B→G (index 2→7)
+          
+          // Cập nhật Cột 2->7: [Tiêu đề, Webhook, Các thứ, Giờ, Nội dung, Trạng thái]
           sheet.getRange(rowNum, 2, 1, 6).setValues([[
-            formData.title, formData.webhookUrl, daysString,
-            formData.time, formData.message, formData.status || 'Active'
+            formData.title, formData.webhookUrl, daysString, formData.time, formData.message, formData.status || 'Active'
           ]]);
-          // Cols J→M (index 10→13)
-          sheet.getRange(rowNum, 10, 1, 4).setValues([[
-            email, nowTime,
-            formData.recurrenceType || 'recurring',
-            formData.endDate || ''
-          ]]);
-          return { success: true, message: 'リマインダーを更新しました。' };
+          // Cập nhật Cột 10->11: [LastModifiedBy, LastModifiedAt]
+          sheet.getRange(rowNum, 10, 1, 2).setValues([[email, nowTime]]);
+          
+          return { success: true, message: 'Cập nhật cấu hình thành công!' };
         }
       }
-      return { success: false, message: '対象のレコードが見つかりません。' };
+      return { success: false, message: 'Không tìm thấy ID bản ghi để cập nhật!' };
+      
     } else {
+      // Logic Thêm (Create)
       const newId = Utilities.getUuid();
       sheet.appendRow([
-        newId,                           // A: ID
-        formData.title,                  // B: タイトル
-        formData.webhookUrl,             // C: Webhook URL
-        daysString,                      // D: 曜日
-        formData.time,                   // E: 時刻
-        formData.message,                // F: 内容
-        'Active',                        // G: 状態
-        email,                           // H: CreatedBy
-        nowTime,                         // I: CreatedAt
-        '', '',                          // J,K: LastModified
-        formData.recurrenceType || 'recurring', // L: RecurrenceType
-        formData.endDate || ''           // M: EndDate
+        newId,               // 0: ID
+        formData.title,          // 1: Tiêu đề
+        formData.webhookUrl,     // 2: Webhook
+        daysString,          // 3: Thứ
+        formData.time,           // 4: Giờ (HH:mm)
+        formData.message,        // 5: Nội dung
+        'Active',            // 6: Trạng thái
+        email,               // 7: CreatedBy
+        nowTime,             // 8: CreatedAt
+        '',                  // 9: LastModifiedBy
+        ''                   // 10: LastModifiedAt
       ]);
-      return { success: true, message: 'リマインダーを保存しました。' };
+      
+      return { success: true, message: 'Lưu cấu hình mới thành công!' };
     }
-  } catch (e) {
-    return { success: false, message: 'エラーが発生しました: ' + e.message };
+  } catch (error) {
+    return { success: false, message: 'Lỗi hệ thống: ' + error.message };
   }
 }
 
@@ -145,44 +151,20 @@ function deleteConfig(id) {
     const sheet = setupSheet();
     const values = sheet.getDataRange().getValues();
     const userEmail = getUserInfo();
+    
     for (let i = 1; i < values.length; i++) {
       if (values[i][0] === id) {
         const createdBy = values[i][7];
         if (createdBy !== userEmail && userEmail !== '') {
-          return { success: false, message: '削除権限がありません。' };
+          return { success: false, message: 'Bạn không có quyền xóa bản ghi này!' };
         }
         sheet.deleteRow(i + 1);
-        return { success: true, message: 'リマインダーを削除しました。' };
+        return { success: true, message: 'Đã xóa cấu hình!' };
       }
     }
-    return { success: false, message: '対象のレコードが見つかりません。' };
-  } catch (e) {
-    return { success: false, message: 'エラーが発生しました: ' + e.message };
-  }
-}
-
-/**
- * ステータスをActive/Inactiveに切り替える
- */
-function toggleStatus(id) {
-  try {
-    const sheet = setupSheet();
-    const values = sheet.getDataRange().getValues();
-    const userEmail = getUserInfo();
-    for (let i = 1; i < values.length; i++) {
-      if (values[i][0] === id) {
-        const createdBy = values[i][7];
-        if (createdBy !== userEmail && userEmail !== '') {
-          return { success: false, message: '変更権限がありません。' };
-        }
-        const newStatus = values[i][6] === 'Active' ? 'Inactive' : 'Active';
-        sheet.getRange(i + 1, 7).setValue(newStatus);
-        return { success: true, newStatus: newStatus };
-      }
-    }
-    return { success: false, message: '対象のレコードが見つかりません。' };
-  } catch (e) {
-    return { success: false, message: 'エラーが発生しました: ' + e.message };
+    return { success: false, message: 'Không tìm thấy cấu hình!' };
+  } catch(error) {
+    return { success: false, message: 'Lỗi khi xóa: ' + error.message };
   }
 }
 
@@ -193,32 +175,33 @@ function checkAndSendMessages() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) return;
+  
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) return;
+  
   const now = new Date();
-  const currentDay = Utilities.formatDate(now, 'GMT+9', 'EEEE');
-  const currentTime = Utilities.formatDate(now, 'GMT+9', 'HH:mm');
-  const todayStr = Utilities.formatDate(now, 'GMT+9', 'yyyy/MM/dd');
+  const currentDay = Utilities.formatDate(now, "GMT+9", "EEEE"); 
+  const currentTime = Utilities.formatDate(now, "GMT+9", "HH:mm"); 
+  
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (row[6] !== 'Active') continue;
-    // EndDate check (col M, index 12)
-    const endDate = row[12] ? String(row[12]).trim() : '';
-    if (endDate && todayStr > endDate) {
-      sheet.getRange(i + 1, 7).setValue('Inactive');
-      continue;
+    const status = row[6];
+    
+    // SỬA TẠI ĐÂY: Ép kiểu scheduledTime về String HH:mm
+    let scheduledTime = row[4];
+    if (scheduledTime instanceof Date) {
+      scheduledTime = Utilities.formatDate(scheduledTime, "GMT+9", "HH:mm");
+    } else {
+      scheduledTime = String(scheduledTime);
     }
-    // Multiple times: split by comma (col E, index 4)
-    let timesRaw = row[4] instanceof Date
-      ? Utilities.formatDate(row[4], 'GMT+9', 'HH:mm')
-      : String(row[4] || '');
-    const times = timesRaw.split(',').map(t => t.trim()).filter(t => t);
-    const scheduledDays = String(row[3] || '');
-    if (!scheduledDays.includes(currentDay) || !times.includes(currentTime)) continue;
-    sendMessageToChat(row[2], row[5], row[1]);
-    // RecurrenceType check (col L, index 11): auto-deactivate if 'once'
-    if ((row[11] || 'recurring') === 'once') {
-      sheet.getRange(i + 1, 7).setValue('Inactive');
+    
+    const scheduledDays = row[3] || "";
+    
+    // Log để kiểm tra trong Apps Script Dashboard nếu cần
+    // console.log(`Checking: ${scheduledTime} vs ${currentTime}`);
+
+    if (status === 'Active' && scheduledTime === currentTime && scheduledDays.includes(currentDay)) {
+       sendMessageToChat(row[2], row[5], row[1]);
     }
   }
 }
