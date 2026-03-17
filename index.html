@@ -1,106 +1,142 @@
-<!DOCTYPE html>
-<html lang="vi">
+﻿<!DOCTYPE html>
+<html lang="ja">
   <head>
     <base target="_top">
     <meta charset="utf-8">
-    <title>Google Chatリマインダー設定</title>
-    <!-- Bootstrap 5 CSS -->
+    <title>Google Chatリマインダー管理</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <style>
-      body { background-color: #f8f9fa; padding: 20px; }
-      .container-fluid { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-      .spinner-border { display: none; margin-left: 10px; }
-      .table-action-btn { background: none; border: none; padding: 5px; }
+      body { background-color: #f0f2f5; }
+      .spinner-border { display: none; }
+      .table-action-btn { background: none; border: none; padding: 4px 6px; }
+      .time-entry-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+      .btn-remove-time { color: #dc3545; background: none; border: none; padding: 0 4px; font-size: 1.1rem; cursor: pointer; }
     </style>
   </head>
   <body>
-    <!-- Navbar hiển thị user email -->
-    <div class="d-flex justify-content-between align-items-center mb-3">
-      <h3 class="text-primary m-0"><i class="bi bi-chat-dots-fill"></i> Google Chatリマインダー管理</h3>
-      <div class="badge bg-secondary p-2 px-3">
-        <i class="bi bi-person-circle"></i> ログイン中：<span id="currentUserEmail">読み込み中...</span>
+    <!-- HEADER -->
+    <div class="container-fluid px-4 py-3">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="text-primary m-0"><i class="bi bi-chat-dots-fill"></i> Google Chatリマインダー管理</h4>
+        <div class="badge bg-secondary p-2 px-3 fs-6">
+          <i class="bi bi-person-circle"></i> ユーザー: <span id="currentUserEmail">取得中...</span>
+        </div>
       </div>
-    </div>
-
-    <div class="container-fluid">
       <div id="alertBox" class="alert d-none" role="alert"></div>
 
-      <div class="row">
-        <!-- FORM CỘT TRÁI -->
-        <div class="col-md-4 border-end pe-4">
-          <h5 class="mb-3" id="formTitle">新しいリマインダーを作成</h5>
-          <form id="configForm" onsubmit="handleFormSubmit(event)">
-            <!-- Hidden ID Field cho mục Update -->
+      <!-- FORM CARD -->
+      <div class="card mb-4 shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center bg-primary text-white">
+          <span id="formTitle"><i class="bi bi-plus-circle"></i> 新しいリマインダーを追加</span>
+          <button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="collapse" data-bs-target="#formBody">
+            <i class="bi bi-chevron-up"></i>
+          </button>
+        </div>
+        <div class="collapse show" id="formBody">
+          <div class="card-body">
             <input type="hidden" id="configId">
-
-            <div class="mb-3">
-              <label for="title" class="form-label fw-bold">タイトル</label>
-              <input type="text" class="form-control form-control-sm" id="title" required placeholder="会議リマインダー...">
-            </div>
-            
-            <div class="mb-3">
-              <label for="webhookUrl" class="form-label fw-bold">Webhook URL</label>
-              <input type="url" class="form-control form-control-sm" id="webhookUrl" required placeholder="https://chat.googleapis.com/...">
-            </div>
-
-            <div class="mb-3">
-              <label class="form-label fw-bold">曜日</label>
-              <div class="d-flex flex-wrap gap-2" style="font-size: 0.9rem;">
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Monday" id="d2"><label class="form-check-label" for="d2">月</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Tuesday" id="d3"><label class="form-check-label" for="d3">火</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Wednesday" id="d4"><label class="form-check-label" for="d4">水</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Thursday" id="d5"><label class="form-check-label" for="d5">木</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Friday" id="d6"><label class="form-check-label" for="d6">金</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Saturday" id="d7"><label class="form-check-label" for="d7">土</label></div>
-                <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Sunday" id="d1"><label class="form-check-label" for="d1">日</label></div>
+            <div class="row g-3">
+              <!-- Row 1: Title + Webhook -->
+              <div class="col-md-6">
+                <label class="form-label fw-bold">タイトル <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" id="title" placeholder="例: 朝会リマインダー...">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-bold">Webhook URL <span class="text-danger">*</span></label>
+                <input type="url" class="form-control form-control-sm" id="webhookUrl" placeholder="https://chat.googleapis.com/...">
+              </div>
+              <!-- Row 2: Days + Recurrence -->
+              <div class="col-md-8">
+                <label class="form-label fw-bold">曜日 <span class="text-danger">*</span></label>
+                <div class="d-flex flex-wrap gap-3 mt-1">
+                  <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Monday" id="d2"><label class="form-check-label" for="d2">月</label></div>
+                  <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Tuesday" id="d3"><label class="form-check-label" for="d3">火</label></div>
+                  <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Wednesday" id="d4"><label class="form-check-label" for="d4">水</label></div>
+                  <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Thursday" id="d5"><label class="form-check-label" for="d5">木</label></div>
+                  <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Friday" id="d6"><label class="form-check-label" for="d6">金</label></div>
+                  <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Saturday" id="d7"><label class="form-check-label" for="d7">土</label></div>
+                  <div class="form-check"><input class="form-check-input day-cb" type="checkbox" value="Sunday" id="d1"><label class="form-check-label" for="d1">日</label></div>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-bold">繰り返しタイプ</label>
+                <div class="d-flex gap-3 mt-1">
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="recurrenceType" id="rOnce" value="once">
+                    <label class="form-check-label" for="rOnce">1回のみ</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="recurrenceType" id="rRecurring" value="recurring" checked>
+                    <label class="form-check-label" for="rRecurring">繰り返し</label>
+                  </div>
+                </div>
+              </div>
+              <!-- Row 3: Times + EndDate + Status -->
+              <div class="col-md-6">
+                <label class="form-label fw-bold">送信時刻 <span class="text-danger">*</span></label>
+                <div id="timeList"></div>
+                <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="addTimeEntry()">
+                  <i class="bi bi-plus"></i> 時刻を追加
+                </button>
+              </div>
+              <div class="col-md-3" id="endDateCol">
+                <label class="form-label fw-bold">邨ゆｺ・律・井ｻｻ諢擾ｼ・/label>
+                <input type="date" class="form-control form-control-sm" id="endDate">
+                <small class="text-muted">遨ｺ逋ｽ=辟｡譛滄剞</small>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label fw-bold">迥ｶ諷・/label>
+                <select class="form-select form-select-sm" id="statusSelect">
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+              <!-- Row 4: Message -->
+              <div class="col-12">
+                <label class="form-label fw-bold">蜀・ｮｹ <span class="text-danger">*</span></label>
+                <textarea class="form-control form-control-sm" id="message" rows="3" placeholder="騾∽ｿ｡縺吶ｋ繝｡繝・そ繝ｼ繧ｸ繧貞・蜉・.."></textarea>
+              </div>
+              <!-- Row 5: Buttons -->
+              <div class="col-md-2">
+                <button type="button" class="btn btn-primary w-100" id="submitBtn" onclick="handleFormSubmit()">
+                  <i class="bi bi-floppy"></i> 菫晏ｭ・
+                  <span class="spinner-border spinner-border-sm" id="spinnerSubmit"></span>
+                </button>
+              </div>
+              <div class="col-md-2">
+                <button type="button" class="btn btn-secondary w-100 d-none" id="cancelBtn" onclick="resetForm()">
+                  繧ｭ繝｣繝ｳ繧ｻ繝ｫ
+                </button>
               </div>
             </div>
-
-            <div class="mb-3">
-              <label for="time" class="form-label fw-bold">時刻 (HH:mm)</label>
-              <input type="time" class="form-control form-control-sm" id="time" required>
-            </div>
-
-            <div class="mb-3">
-              <label for="message" class="form-label fw-bold">内容</label>
-              <textarea class="form-control form-control-sm" id="message" rows="3" required></textarea>
-            </div>
-
-            <div class="d-flex gap-2">
-              <button type="submit" class="btn btn-primary w-100" id="submitBtn">
-                <i class="bi bi-floppy"></i> 保存
-                <span class="spinner-border spinner-border-sm" id="spinnerSubmit"></span>
-              </button>
-              <button type="button" class="btn btn-secondary d-none" id="cancelBtn" onclick="resetForm()">
-                キャンセル
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <!-- TABLE CỘT PHẢI -->
-        <div class="col-md-8 ps-4">
-          <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="m-0">一覧</h5>
-            <button class="btn btn-sm btn-outline-secondary" onclick="loadTableData()">
-              <i class="bi bi-arrow-clockwise"></i> 再読み込み
-            </button>
           </div>
-          
+        </div>
+      </div>
+
+      <!-- TABLE CARD -->
+      <div class="card shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span class="fw-bold">繝ｪ繝槭う繝ｳ繝繝ｼ荳隕ｧ</span>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadTableData()">
+            <i class="bi bi-arrow-clockwise"></i> 譖ｴ譁ｰ
+          </button>
+        </div>
+        <div class="card-body p-0">
           <div class="table-responsive">
-            <table class="table table-hover table-bordered align-middle" style="font-size: 0.9rem;">
+            <table class="table table-hover table-bordered align-middle mb-0" style="font-size: 0.88rem;">
               <thead class="table-light">
                 <tr>
-                  <th>タイトル</th>
-                  <th>送信スケジュール</th>
-                  <th>作成者</th>
-                  <th class="text-center" width="100">操作</th>
+                  <th>繧ｿ繧､繝医Ν</th>
+                  <th>騾∽ｿ｡蜀・ｮｹ</th>
+                  <th>繧ｹ繧ｱ繧ｸ繝･繝ｼ繝ｫ</th>
+                  <th>邨ゆｺ・律</th>
+                  <th class="text-center">迥ｶ諷・/th>
+                  <th class="text-center" width="100">謫堺ｽ・/th>
                 </tr>
               </thead>
               <tbody id="tableBody">
-                <tr><td colspan="4" class="text-center py-4">データを読み込み中... <div class="spinner-border spinner-border-sm text-primary" style="display:inline-block"></div></td></tr>
+                <tr><td colspan="6" class="text-center py-4">繝・・繧ｿ繧定ｪｭ縺ｿ霎ｼ縺ｿ荳ｭ... <div class="spinner-border spinner-border-sm text-primary" style="display:inline-block"></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -108,192 +144,242 @@
       </div>
     </div>
 
-    <!-- Bundle CSS/JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    
     <script>
-      let currentConfigs = []; // Lưu state dữ liệu
+      let currentConfigs = [];
 
-      // Khởi chạy khi load trang
-      document.addEventListener("DOMContentLoaded", function() {
+      document.addEventListener('DOMContentLoaded', function() {
+        addTimeEntry();
         loadTableData();
+        document.querySelectorAll('input[name="recurrenceType"]').forEach(r => {
+          r.addEventListener('change', function() {
+            document.getElementById('endDateCol').style.display = this.value === 'once' ? 'none' : '';
+          });
+        });
       });
 
-      // Lấy dữ liệu Table từ GS
-      function loadTableData() {
-        document.getElementById('tableBody').innerHTML = '<tr><td colspan="4" class="text-center py-4">データを読み込み中... <div class="spinner-border spinner-border-sm text-primary" style="display:inline-block"></div></td></tr>';
+      // --- Time entries ---
+      function addTimeEntry(value) {
+        const timeList = document.getElementById('timeList');
+        const div = document.createElement('div');
+        div.className = 'time-entry-row';
+        div.innerHTML =
+          '<input type="time" class="form-control form-control-sm time-entry" style="max-width:130px;" value="' + (value || '') + '">' +
+          '<button type="button" class="btn-remove-time" onclick="removeTimeEntry(this)" title="蜑企勁"><i class="bi bi-x-circle"></i></button>';
+        timeList.appendChild(div);
+      }
 
+      function removeTimeEntry(btn) {
+        const timeList = document.getElementById('timeList');
+        if (timeList.children.length <= 1) return;
+        btn.closest('.time-entry-row').remove();
+      }
+
+      function getTimeValues() {
+        return Array.from(document.querySelectorAll('.time-entry')).map(i => i.value.trim()).filter(v => v);
+      }
+
+      // --- Load data ---
+      function loadTableData() {
+        document.getElementById('tableBody').innerHTML =
+          '<tr><td colspan="6" class="text-center py-4">繝・・繧ｿ繧定ｪｭ縺ｿ霎ｼ縺ｿ荳ｭ... <div class="spinner-border spinner-border-sm text-primary" style="display:inline-block"></div></td></tr>';
         google.script.run
           .withSuccessHandler(function(res) {
-            // Defensive: check res and res.configs
             if (!res || !Array.isArray(res.configs)) {
-              let msg = 'データ取得エラー: サーバーから不正なデータが返されました。';
-              if (res && res.errorMessage) {
-                msg += '<br><b>Server error:</b> ' + res.errorMessage;
-                console.error('getConfigs errorMessage:', res.errorMessage);
-              }
-              console.error('Invalid response from getConfigs:', res);
+              let msg = '繝・・繧ｿ蜿門ｾ励お繝ｩ繝ｼ: 繧ｵ繝ｼ繝舌・縺九ｉ荳肴ｭ｣縺ｪ繝・・繧ｿ縺瑚ｿ斐＆繧後∪縺励◆縲・;
+              if (res && res.errorMessage) msg += '<br><b>Error:</b> ' + res.errorMessage;
               showAlert(msg, 'danger');
-              document.getElementById('tableBody').innerHTML = '<tr><td colspan="4" class="text-center text-danger">データ取得エラー</td></tr>';
+              console.error('getConfigs bad response:', res);
+              document.getElementById('tableBody').innerHTML =
+                '<tr><td colspan="6" class="text-center text-danger">繝・・繧ｿ蜿門ｾ励お繝ｩ繝ｼ</td></tr>';
               return;
             }
+            if (res.warning) showAlert(res.warning, 'warning');
             currentConfigs = res.configs;
-            document.getElementById('currentUserEmail').textContent = res.currentUser || "ゲスト（オフラインテスト）";
+            document.getElementById('currentUserEmail').textContent = res.currentUser || '繧ｲ繧ｹ繝・;
             renderTable(res.configs);
-            // Khởi tạo tooltips
-            const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
-            [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+            document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
           })
           .withFailureHandler(function(err) {
-            showAlert('Lỗi tải dữ liệu: ' + (err && err.message ? err.message : err), 'danger');
-            document.getElementById('tableBody').innerHTML = '<tr><td colspan="4" class="text-center text-danger">データ取得エラー</td></tr>';
+            const msg = err && err.message ? err.message : String(err);
+            showAlert('繝・・繧ｿ蜿門ｾ励お繝ｩ繝ｼ: ' + msg, 'danger');
             console.error('getConfigs failed:', err);
+            document.getElementById('tableBody').innerHTML =
+              '<tr><td colspan="6" class="text-center text-danger">繝・・繧ｿ蜿門ｾ励お繝ｩ繝ｼ</td></tr>';
           })
           .getConfigs();
       }
 
-      // Vẽ Table
+      // --- Render table ---
+      function escHtml(str) {
+        return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      }
+
       function renderTable(data) {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = '';
-        
         if (data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">リマインダーが設定されていません。</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">繝ｪ繝槭う繝ｳ繝繝ｼ縺瑚ｨｭ螳壹＆繧後※縺・∪縺帙ｓ縲・/td></tr>';
           return;
         }
-
         data.forEach(item => {
-          // Tooltip hiện thông tin Modified
-          const modifiedInfo = item.lastModifiedBy ? `最終更新: ${item.lastModifiedAt}（${item.lastModifiedBy}）` : `作成日時: ${item.createdAt}`;
-          
-          // Action Buttons: disable nếu không có quyền canEdit
-          const actionButtons = item.canEdit ? `
-              <button class="table-action-btn text-primary" onclick="editConfig('${item.id}')" title="編集"><i class="bi bi-pencil-square"></i></button>
-              <button class="table-action-btn text-danger ms-1" onclick="deleteConfigPrompt('${item.id}')" title="削除"><i class="bi bi-trash"></i></button>
-            ` : `<span class="badge bg-light text-muted"><i class="bi bi-shield-lock"></i> 閲覧のみ</span>`;
+          const shortMsg = item.message && item.message.length > 80
+            ? item.message.substring(0, 80) + '...' : (item.message || '');
+          const recurrBadge = item.recurrenceType === 'once'
+            ? '<span class="badge bg-warning text-dark ms-1">1蝗槭・縺ｿ</span>'
+            : '<span class="badge bg-info text-dark ms-1">郢ｰ繧願ｿ斐＠</span>';
+          const isActive = item.status === 'Active';
+          const statusBadge = isActive
+            ? '<span class="badge bg-success">Active</span>'
+            : '<span class="badge bg-secondary">Inactive</span>';
+          const toggleIcon = isActive ? 'bi-toggle-on text-success fs-4' : 'bi-toggle-off text-secondary fs-4';
+          const toggleTitle = isActive ? '辟｡蜉ｹ蛹・ : '譛牙柑蛹・;
+          const modifiedInfo = item.lastModifiedBy
+            ? '譛邨よ峩譁ｰ: ' + item.lastModifiedAt + '・・ + item.lastModifiedBy + '・・
+            : '菴懈・譌･譎・ ' + item.createdAt;
+          const timeBadges = String(item.time || '').split(',')
+            .map(t => '<span class="badge bg-primary me-1">' + escHtml(t.trim()) + '</span>').join('');
 
-          const tr = `
-            <tr>
-              <td>
-                <span class="fw-bold">${item.title}</span><br>
-                <small class="text-muted text-truncate d-inline-block" style="max-width: 250px;">${item.webhookUrl}</small>
-              </td>
-              <td>
-                <span class="badge bg-info text-dark">${item.time}</span><br>
-                <small class="text-muted">${item.days}</small>
-              </td>
-              <td>
-                <div class="d-flex align-items-center gap-1" data-bs-toggle="tooltip" data-bs-placement="top" title="${modifiedInfo}">
-                  <span>${item.createdBy || 'Anonymous'}</span>
-                  <i class="bi bi-info-circle text-primary" style="font-size: 0.8rem; cursor:help;"></i>
-                </div>
-              </td>
-              <td class="text-center">${actionButtons}</td>
-            </tr>
-          `;
+          const tr = '<tr>' +
+            '<td><span class="fw-bold">' + escHtml(item.title) + '</span>' +
+              '<div data-bs-toggle="tooltip" title="' + escHtml(modifiedInfo) + '" style="cursor:help">' +
+              '<small class="text-muted">' + escHtml(item.createdBy || '') + '</small>' +
+              ' <i class="bi bi-info-circle text-primary" style="font-size:0.75rem;"></i></div></td>' +
+            '<td><span data-bs-toggle="tooltip" title="' + escHtml(item.message || '') + '">' + escHtml(shortMsg) + '</span></td>' +
+            '<td>' + timeBadges + recurrBadge + '<br><small class="text-muted">' + escHtml(item.days || '') + '</small></td>' +
+            '<td>' + (item.endDate ? escHtml(item.endDate) : '<span class="text-muted">辟｡譛滄剞</span>') + '</td>' +
+            '<td class="text-center">' + statusBadge + '</td>' +
+            '<td class="text-center">' +
+              '<button class="table-action-btn text-primary" onclick="editConfig(\'' + item.id + '\')" title="邱ｨ髮・><i class="bi bi-pencil-square fs-5"></i></button>' +
+              '<button class="table-action-btn ms-1" onclick="toggleStatusPrompt(\'' + item.id + '\')" title="' + toggleTitle + '"><i class="bi ' + toggleIcon + '"></i></button>' +
+              '<button class="table-action-btn text-danger ms-1" onclick="deleteConfigPrompt(\'' + item.id + '\')" title="蜑企勁"><i class="bi bi-trash fs-5"></i></button>' +
+            '</td></tr>';
           tbody.insertAdjacentHTML('beforeend', tr);
         });
       }
 
-      // Form Submit - Create / Update
-      function handleFormSubmit(event) {
-        event.preventDefault();
-        
-        const checkboxes = document.querySelectorAll('.day-cb:checked');
-        const days = Array.from(checkboxes).map(cb => cb.value);
-        if (days.length === 0) {
-          showAlert('少なくとも1つの曜日を選択してください！', 'danger'); return;
-        }
-
+      // --- Form submit ---
+      function handleFormSubmit() {
+        const days = Array.from(document.querySelectorAll('.day-cb:checked')).map(cb => cb.value);
+        if (days.length === 0) { showAlert('蟆代↑縺上→繧・縺､縺ｮ譖懈律繧帝∈謚槭＠縺ｦ縺上□縺輔＞・・, 'danger'); return; }
+        const times = getTimeValues();
+        if (times.length === 0) { showAlert('蟆代↑縺上→繧・縺､縺ｮ譎ょ綾繧貞・蜉帙＠縺ｦ縺上□縺輔＞・・, 'danger'); return; }
+        const title = document.getElementById('title').value.trim();
+        const webhookUrl = document.getElementById('webhookUrl').value.trim();
+        const message = document.getElementById('message').value.trim();
+        if (!title || !webhookUrl || !message) { showAlert('繧ｿ繧､繝医Ν縲仝ebhook URL縲∝・螳ｹ縺ｯ蠢・医〒縺吶・, 'danger'); return; }
+        const recurrenceType = document.querySelector('input[name="recurrenceType"]:checked').value;
         const data = {
           id: document.getElementById('configId').value,
-          title: document.getElementById('title').value.trim(),
-          webhookUrl: document.getElementById('webhookUrl').value.trim(),
+          title: title,
+          webhookUrl: webhookUrl,
           days: days,
-          time: document.getElementById('time').value,
-          message: document.getElementById('message').value.trim()
+          time: times.join(', '),
+          message: message,
+          status: document.getElementById('statusSelect').value,
+          recurrenceType: recurrenceType,
+          endDate: recurrenceType === 'recurring' ? document.getElementById('endDate').value : ''
         };
-
         const btn = document.getElementById('submitBtn');
         const spinner = document.getElementById('spinnerSubmit');
         btn.disabled = true; spinner.style.display = 'inline-block';
-        showAlert('データを保存中...', 'info');
-
+        showAlert('繝・・繧ｿ繧剃ｿ晏ｭ倅ｸｭ...', 'info');
         google.script.run
-          .withSuccessHandler(function(response) {
+          .withSuccessHandler(function(res) {
             btn.disabled = false; spinner.style.display = 'none';
-            if (response.success) {
-              showAlert(response.message, 'success');
-              resetForm();
-              loadTableData(); // Reload Table
-            } else {
-              showAlert(response.message, 'danger');
-            }
+            if (res.success) { showAlert(res.message, 'success'); resetForm(); loadTableData(); }
+            else showAlert(res.message, 'danger');
           })
           .withFailureHandler(function(err) {
             btn.disabled = false; spinner.style.display = 'none';
-            showAlert('Lỗi kết nối: ' + err.message, 'danger');
+            showAlert('謗･邯壹お繝ｩ繝ｼ: ' + (err && err.message ? err.message : err), 'danger');
           })
           .upsertRemind(data);
       }
 
-      // Xóa bản ghi
-      function deleteConfigPrompt(id) {
-        if (!confirm('本当にこのリマインダーを削除しますか？この操作は元に戻せません。')) return;
-        
-        showAlert('削除中...', 'warning');
+      // --- Toggle status ---
+      function toggleStatusPrompt(id) {
+        const item = currentConfigs.find(c => c.id === id);
+        if (!item) return;
+        const action = item.status === 'Active' ? '辟｡蜉ｹ蛹・ : '譛牙柑蛹・;
+        if (!confirm('縲・ + item.title + '縲阪ｒ' + action + '縺励∪縺吶°・・)) return;
         google.script.run
           .withSuccessHandler(function(res) {
-            if (res.success) {
-              showAlert(res.message, 'success');
-              loadTableData();
-            } else {
-              showAlert(res.message, 'danger');
-            }
+            if (res.success) { showAlert('繧ｹ繝・・繧ｿ繧ｹ繧・' + res.newStatus + ' 縺ｫ螟画峩縺励∪縺励◆縲・, 'success'); loadTableData(); }
+            else showAlert(res.message, 'danger');
           })
           .withFailureHandler(function(err) {
-            showAlert('Lỗi kết nối: ' + err.message, 'danger');
+            showAlert('謗･邯壹お繝ｩ繝ｼ: ' + (err && err.message ? err.message : err), 'danger');
+          })
+          .toggleStatus(id);
+      }
+
+      // --- Delete ---
+      function deleteConfigPrompt(id) {
+        const item = currentConfigs.find(c => c.id === id);
+        if (!item) return;
+        if (!confirm('縲・ + item.title + '縲阪ｒ蜑企勁縺励∪縺吶°・溘％縺ｮ謫堺ｽ懊・蜈・↓謌ｻ縺帙∪縺帙ｓ縲・)) return;
+        showAlert('蜑企勁荳ｭ...', 'warning');
+        google.script.run
+          .withSuccessHandler(function(res) {
+            if (res.success) { showAlert(res.message, 'success'); loadTableData(); }
+            else showAlert(res.message, 'danger');
+          })
+          .withFailureHandler(function(err) {
+            showAlert('謗･邯壹お繝ｩ繝ｼ: ' + (err && err.message ? err.message : err), 'danger');
           })
           .deleteConfig(id);
       }
 
-      // Nhấn Edit -> Fill dữ liệu lên Form
+      // --- Edit ---
       function editConfig(id) {
         const item = currentConfigs.find(c => c.id === id);
         if (!item) return;
-
         document.getElementById('configId').value = item.id;
         document.getElementById('title').value = item.title;
         document.getElementById('webhookUrl').value = item.webhookUrl;
-        document.getElementById('time').value = item.time;
         document.getElementById('message').value = item.message;
-        
-        // Reset checkboxes then check matched days
+        document.getElementById('statusSelect').value = item.status || 'Active';
+        document.getElementById('endDate').value = item.endDate || '';
         document.querySelectorAll('.day-cb').forEach(cb => cb.checked = false);
-        const savedDays = item.days.split(', ').map(d => d.trim());
-        document.querySelectorAll('.day-cb').forEach(cb => {
-            if (savedDays.includes(cb.value)) cb.checked = true;
-        });
-
-        // Chuyển UI Form sang Edit Mode
-        document.getElementById('formTitle').textContent = `リマインダーを編集: ${item.title}`;
+        const savedDays = String(item.days || '').split(',').map(d => d.trim());
+        document.querySelectorAll('.day-cb').forEach(cb => { if (savedDays.includes(cb.value)) cb.checked = true; });
+        const timeList = document.getElementById('timeList');
+        timeList.innerHTML = '';
+        const savedTimes = String(item.time || '').split(',').map(t => t.trim()).filter(t => t);
+        (savedTimes.length ? savedTimes : ['']).forEach(t => addTimeEntry(t));
+        const rt = item.recurrenceType || 'recurring';
+        document.querySelector('input[name="recurrenceType"][value="' + rt + '"]').checked = true;
+        document.getElementById('endDateCol').style.display = rt === 'once' ? 'none' : '';
+        document.getElementById('formTitle').innerHTML = '<i class="bi bi-pencil"></i> 繝ｪ繝槭う繝ｳ繝繝ｼ繧堤ｷｨ髮・ ' + escHtml(item.title);
         document.getElementById('cancelBtn').classList.remove('d-none');
+        const formBody = document.getElementById('formBody');
+        if (!formBody.classList.contains('show')) new bootstrap.Collapse(formBody, { toggle: false }).show();
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
 
-      // Reset Form về Create Mode
+      // --- Reset form ---
       function resetForm() {
-        document.getElementById('configForm').reset();
         document.getElementById('configId').value = '';
-        document.getElementById('formTitle').textContent = '新しいリマインダーを作成';
+        document.getElementById('title').value = '';
+        document.getElementById('webhookUrl').value = '';
+        document.getElementById('message').value = '';
+        document.getElementById('statusSelect').value = 'Active';
+        document.getElementById('endDate').value = '';
+        document.querySelectorAll('.day-cb').forEach(cb => cb.checked = false);
+        document.getElementById('timeList').innerHTML = '';
+        addTimeEntry();
+        document.querySelector('input[name="recurrenceType"][value="recurring"]').checked = true;
+        document.getElementById('endDateCol').style.display = '';
+        document.getElementById('formTitle').innerHTML = '<i class="bi bi-plus-circle"></i> 譁ｰ縺励＞繝ｪ繝槭う繝ｳ繝繝ｼ繧剃ｽ懈・';
         document.getElementById('cancelBtn').classList.add('d-none');
       }
 
-      // Hàm hiển thị Alert
+      // --- Alert ---
       function showAlert(message, type) {
         const alertBox = document.getElementById('alertBox');
-        alertBox.className = `alert alert-${type}`;
-        alertBox.textContent = message;
+        alertBox.className = 'alert alert-' + type;
+        alertBox.innerHTML = message;
       }
     </script>
   </body>
