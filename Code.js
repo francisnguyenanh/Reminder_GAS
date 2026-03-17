@@ -54,7 +54,7 @@ function getConfigs() {
       // 日付オブジェクトを文字列に安全に変換する補助関数
       const formatSafeDate = (val) => {
         if (val instanceof Date) {
-          return Utilities.formatDate(val, 'GMT+7', 'yyyy/MM/dd HH:mm:ss');
+          return Utilities.formatDate(val, 'GMT+9', 'yyyy/MM/dd HH:mm:ss');
         }
         return val ? String(val) : "";
       };
@@ -64,7 +64,7 @@ function getConfigs() {
         title: row[1],
         webhookUrl: row[2],
         days: row[3],
-        time: (row[4] instanceof Date) ? Utilities.formatDate(row[4], 'GMT+7', 'HH:mm') : String(row[4]),
+        time: (row[4] instanceof Date) ? Utilities.formatDate(row[4], 'GMT+9', 'HH:mm') : String(row[4]),
         message: row[5],
         status: row[6],
         createdBy: createdBy,
@@ -91,7 +91,7 @@ function upsertRemind(formData) {
   try {
     const sheet = setupSheet();
     const email = getUserInfo();
-    const nowTime = Utilities.formatDate(new Date(), "GMT+7", "dd/MM/yyyy HH:mm:ss");
+    const nowTime = Utilities.formatDate(new Date(), "GMT+9", "dd/MM/yyyy HH:mm:ss");
     const daysString = formData.days.join(', ');
     const data = sheet.getDataRange().getValues();
     
@@ -180,19 +180,28 @@ function checkAndSendMessages() {
   if (data.length <= 1) return;
   
   const now = new Date();
-  const currentDay = Utilities.formatDate(now, "GMT+7", "EEEE"); 
-  const currentTime = Utilities.formatDate(now, "GMT+7", "HH:mm"); 
+  const currentDay = Utilities.formatDate(now, "GMT+9", "EEEE"); 
+  const currentTime = Utilities.formatDate(now, "GMT+9", "HH:mm"); 
   
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    // Các vị trí cột mới:
-    // 0: ID, 1: Tiêu đề, 2: Webhook, 3: Thứ, 4: Giờ, 5: Nội dung, 6: Trạng thái
     const status = row[6];
-    const scheduledTime = row[4];
+    
+    // SỬA TẠI ĐÂY: Ép kiểu scheduledTime về String HH:mm
+    let scheduledTime = row[4];
+    if (scheduledTime instanceof Date) {
+      scheduledTime = Utilities.formatDate(scheduledTime, "GMT+9", "HH:mm");
+    } else {
+      scheduledTime = String(scheduledTime);
+    }
+    
     const scheduledDays = row[3] || "";
     
+    // Log để kiểm tra trong Apps Script Dashboard nếu cần
+    // console.log(`Checking: ${scheduledTime} vs ${currentTime}`);
+
     if (status === 'Active' && scheduledTime === currentTime && scheduledDays.includes(currentDay)) {
-       sendMessageToChat(row[2], row[5]);
+       sendMessageToChat(row[2], row[5], row[1]);
     }
   }
 }
@@ -200,9 +209,15 @@ function checkAndSendMessages() {
 /**
  * Gửi tin nhắn đến Google Chat Webhook
  */
-function sendMessageToChat(webhookUrl, message) {
+function sendMessageToChat(webhookUrl, message, title = "THÔNG BÁO/通知") {
   if (!webhookUrl) return;
-  const payload = { text: message };
+  
+  // Sử dụng Markdown để làm nổi bật nội dung
+  const formattedText = `*🔔 ${title}*\n` + 
+                        `__________________\n\n` + 
+                        `${message}`;
+
+  const payload = { text: formattedText };
   const options = {
     method: 'post',
     contentType: 'application/json',
@@ -215,6 +230,11 @@ function sendMessageToChat(webhookUrl, message) {
   } catch (error) {
     Logger.log('Lỗi gửi Webhook: ' + error.message);
   }
+}
+
+function testWebhook() {
+  const url = "https://chat.googleapis.com/v1/spaces/AAQAAgZMsus/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=aIgHucwPisdiXGd-BSvBs828ooH9CrNknO7x5dk34CI";
+  sendMessageToChat(url, "Tin nhắn thử nghiệm từ Apps Script", "THỬ NGHIỆM/テスト");
 }
 
 /**
