@@ -20,6 +20,10 @@ function getUserInfo() {
 
 /**
  * Khởi tạo sheet nếu chưa có và cập nhật Headers
+ * Column layout:
+ *   A(1)=ID, B(2)=タイトル, C(3)=Webhook URL, D(4)=曜日, E(5)=時刻,
+ *   F(6)=内容, G(7)=状態, H(8)=CreatedBy, I(9)=CreatedAt,
+ *   J(10)=LastModifiedBy, K(11)=LastModifiedAt, L(12)=RecurrenceType, M(13)=EndDate
  */
 function setupSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -82,6 +86,10 @@ function getConfigs() {
 
 /**
  * Hàm Lưu/Sửa (kèm truy vết)
+ * Column layout (1-indexed for getRange):
+ *   A(1)=ID, B(2)=タイトル, C(3)=Webhook URL, D(4)=曜日, E(5)=時刻,
+ *   F(6)=内容, G(7)=状態, H(8)=CreatedBy, I(9)=CreatedAt,
+ *   J(10)=LastModifiedBy, K(11)=LastModifiedAt, L(12)=RecurrenceType, M(13)=EndDate
  * @param {Object} formData Đối tượng chứa thông tin cấu hình từ form
  */
 function upsertRemind(formData) {
@@ -217,8 +225,12 @@ function checkAndSendMessages() {
     if (!scheduledDays.includes(currentDay) || !times.includes(currentTime)) continue;
     sendMessageToChat(row[2], row[5], row[1]);
     // RecurrenceType check (col L, index 11): auto-deactivate if 'once'
+    // Only deactivate after the last scheduled time of the day has been sent
     if ((row[11] || 'recurring') === 'once') {
-      sheet.getRange(i + 1, 7).setValue('Inactive');
+      const sortedTimes = [...times].sort();
+      if (currentTime >= sortedTimes[sortedTimes.length - 1]) {
+        sheet.getRange(i + 1, 7).setValue('Inactive');
+      }
     }
   }
 }
@@ -231,7 +243,7 @@ function sendMessageToChat(webhookUrl, message, title = "THÔNG BÁO/通知") {
   
   // Sử dụng Markdown để làm nổi bật nội dung
   const formattedText = `*🔔 ${title}*\n` + 
-                        `__________________\n\n` + 
+                        `—————————————————\n\n` + 
                         `${message}`;
 
   const payload = { text: formattedText };
@@ -268,4 +280,230 @@ function createTimeDrivenTriggers() {
       .timeBased()
       .everyMinutes(1)
       .create();
+}
+
+// =============================================================
+// ===== NotebookLM 自動変換 (Auto Convert Feed) =====
+// Config keys stored in ScriptProperties
+// =============================================================
+const NLM_CONFIG_KEYS = ['FOLDER_INPUT_ID', 'MASTER_SHEET_ID', 'MASTER_DOC_ID', 'FOLDER_ARCHIVE_ID'];
+
+/**
+ * 設定を取得する (UI用)
+ */
+function getNotebookLMConfig() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const config = {};
+    NLM_CONFIG_KEYS.forEach(k => { config[k] = props.getProperty(k) || ''; });
+    return { success: true, config: config };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+/**
+ * 設定を保存する (UI用)
+ */
+function saveNotebookLMConfig(data) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    NLM_CONFIG_KEYS.forEach(k => {
+      if (data[k] !== undefined) props.setProperty(k, String(data[k]).trim());
+    });
+    return { success: true, message: '設定を保存しました。' };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+/**
+ * 手動実行 (UI用) — 入力フォルダのファイルを処理してMasterに統合
+ */
+function runNotebookLMProcess() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const config = {};
+    NLM_CONFIG_KEYS.forEach(k => { config[k] = props.getProperty(k) || ''; });
+    if (!config.FOLDER_INPUT_ID || !config.MASTER_SHEET_ID || !config.MASTER_DOC_ID || !config.FOLDER_ARCHIVE_ID) {
+      return { success: false, message: '設定が不完全です。すべてのIDを入力・保存してください。' };
+    }
+    const log = nlmMainProcess(config);
+    return { success: true, message: '処理が完了しました。', log: log };
+  } catch (e) {
+    return { success: false, message: 'エラー: ' + e.message };
+  }
+}
+
+/**
+ * メイン処理: 入力フォルダのファイルを種別ごとに処理
+ */
+function nlmMainProcess(config) {
+  const folderInput = DriveApp.getFolderById(config.FOLDER_INPUT_ID);
+  const archiveFolder = DriveApp.getFolderById(config.FOLDER_ARCHIVE_ID);
+  const files = folderInput.getFiles();
+  const log = [];
+
+  nlmClearMasterFiles(config);
+  log.push('Masterファイルをクリアしました。');
+
+  while (files.hasNext()) {
+    const file = files.next();
+    const fileName = file.getName();
+    const mimeType = file.getMimeType();
+    try {
+      if (mimeType === MimeType.GOOGLE_SHEETS || fileName.endsWith('.xlsx')) {
+        nlmProcessExcelToMaster(file, config);
+        log.push('[Excel/Sheets] ' + fileName);
+      } else if (mimeType === MimeType.GOOGLE_DOCS || fileName.endsWith('.docx') || fileName.endsWith('.txt')) {
+        nlmProcessDocToMaster(file, config);
+        log.push('[Doc/Text] ' + fileName);
+      } else if (mimeType === MimeType.JPEG || mimeType === MimeType.PNG || mimeType === MimeType.PDF) {
+        nlmProcessImageToMaster(file, config);
+        log.push('[画像/PDF] ' + fileName);
+      } else {
+        log.push('[スキップ] ' + fileName + ' (対応外のファイル形式)');
+      }
+      file.moveTo(archiveFolder);
+    } catch (e) {
+      log.push('[エラー] ' + fileName + ': ' + e.message);
+      Logger.log('エラー ' + fileName + ': ' + e.message);
+    }
+  }
+  return log;
+}
+
+/**
+ * 画像・PDF を OCR してMaster Docへ追加
+ */
+function nlmProcessImageToMaster(file, config) {
+  const masterDoc = DocumentApp.openById(config.MASTER_DOC_ID);
+  const body = masterDoc.getBody();
+  const resource = { name: 'temp_ocr_' + file.getName(), mimeType: MimeType.GOOGLE_DOCS };
+  const tempFile = Drive.Files.create(resource, file.getBlob());
+  const textContent = DocumentApp.openById(tempFile.id).getBody().getText();
+  body.appendParagraph('NGUỒN ẢNH/PDF: ' + file.getName()).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  body.appendParagraph(textContent);
+  body.appendPageBreak();
+  Drive.Files.remove(tempFile.id);
+}
+
+/**
+ * Excel / Google Sheets を Master Sheetsへコピー
+ */
+function nlmProcessExcelToMaster(file, config) {
+  const masterSs = SpreadsheetApp.openById(config.MASTER_SHEET_ID);
+  if (file.getName().endsWith('.xlsx')) {
+    const tempFile = Drive.Files.create(
+      { name: file.getName().replace('.xlsx', ''), mimeType: MimeType.GOOGLE_SHEETS },
+      file.getBlob()
+    );
+    SpreadsheetApp.openById(tempFile.id).getSheets().forEach(sheet => {
+      sheet.copyTo(masterSs).setName(file.getName() + ' - ' + sheet.getName());
+    });
+    Drive.Files.remove(tempFile.id);
+  } else {
+    SpreadsheetApp.openById(file.getId()).getSheets().forEach(sheet => {
+      sheet.copyTo(masterSs).setName(file.getName() + ' - ' + sheet.getName());
+    });
+  }
+}
+
+/**
+ * Docx / Google Docs / TXT を Master Docへ追記
+ */
+function nlmProcessDocToMaster(file, config) {
+  const masterDoc = DocumentApp.openById(config.MASTER_DOC_ID);
+  const body = masterDoc.getBody();
+  let textContent = '';
+  if (file.getName().endsWith('.docx')) {
+    const tempFile = Drive.Files.create(
+      { name: 'temp_doc', mimeType: MimeType.GOOGLE_DOCS },
+      file.getBlob()
+    );
+    textContent = DocumentApp.openById(tempFile.id).getBody().getText();
+    Drive.Files.remove(tempFile.id);
+  } else if (file.getMimeType() === MimeType.GOOGLE_DOCS) {
+    textContent = DocumentApp.openById(file.getId()).getBody().getText();
+  } else {
+    textContent = file.getBlob().getDataAsString();
+  }
+  body.appendParagraph('NGUỒN: ' + file.getName()).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  body.appendParagraph(textContent);
+  body.appendPageBreak();
+}
+
+/**
+ * Master Doc と Master Sheets をクリア
+ */
+function nlmClearMasterFiles(config) {
+  DocumentApp.openById(config.MASTER_DOC_ID).getBody().clear();
+  const ss = SpreadsheetApp.openById(config.MASTER_SHEET_ID);
+  const sheets = ss.getSheets();
+  ss.insertSheet('TempClearSheet');
+  sheets.forEach(s => ss.deleteSheet(s));
+  ss.getSheets()[0].setName('Nội dung mới');
+}
+
+/**
+ * ローカルファイル（Base64）を入力フォルダへアップロード
+ * @param {Array} filesData [{name, mimeType, base64}]
+ */
+function uploadLocalFilesToInputFolder(filesData) {
+  try {
+    const folderId = PropertiesService.getScriptProperties().getProperty('FOLDER_INPUT_ID');
+    if (!folderId) return { success: false, message: '入力フォルダIDが設定されていません。設定を保存してください。' };
+    const folder = DriveApp.getFolderById(folderId);
+    const results = [];
+    filesData.forEach(function(f) {
+      try {
+        const bytes = Utilities.base64Decode(f.base64);
+        const blob = Utilities.newBlob(bytes, f.mimeType || 'application/octet-stream', f.name);
+        const created = folder.createFile(blob);
+        results.push({ name: f.name, success: true, id: created.getId() });
+      } catch (e) {
+        results.push({ name: f.name, success: false, message: e.message });
+      }
+    });
+    return { success: true, results: results };
+  } catch (e) {
+    return { success: false, message: 'エラー: ' + e.message };
+  }
+}
+
+/**
+ * Google Drive のファイル（URL または ID）を入力フォルダへコピー
+ * @param {Array} urlsOrIds [string, ...]
+ */
+function copyDriveFilesToInputFolder(urlsOrIds) {
+  try {
+    const folderId = PropertiesService.getScriptProperties().getProperty('FOLDER_INPUT_ID');
+    if (!folderId) return { success: false, message: '入力フォルダIDが設定されていません。設定を保存してください。' };
+    const folder = DriveApp.getFolderById(folderId);
+    const results = [];
+    urlsOrIds.forEach(function(urlOrId) {
+      // URL からファイルID を抽出
+      let fileId = String(urlOrId).trim();
+      const patterns = [
+        /\/d\/([a-zA-Z0-9_-]{10,})/,
+        /id=([a-zA-Z0-9_-]{10,})/,
+        /\/file\/d\/([a-zA-Z0-9_-]{10,})/
+      ];
+      for (let j = 0; j < patterns.length; j++) {
+        const m = fileId.match(patterns[j]);
+        if (m) { fileId = m[1]; break; }
+      }
+      try {
+        const src = DriveApp.getFileById(fileId);
+        src.makeCopy(src.getName(), folder);
+        results.push({ url: urlOrId, success: true, fileName: src.getName() });
+      } catch (e) {
+        results.push({ url: urlOrId, success: false, message: e.message });
+      }
+    });
+    const ok = results.filter(function(r) { return r.success; }).length;
+    return { success: true, results: results, okCount: ok, ngCount: results.length - ok };
+  } catch (e) {
+    return { success: false, message: 'エラー: ' + e.message };
+  }
 }
