@@ -669,41 +669,42 @@ function getSpaceMembers(spaceId) {
 
 /**
  * 複数ユーザーの Google カレンダーを参照し、全員が空いている共通スロットを返す。
+ * 日付範囲 × 毎日の時間枠でスロットを計算する。
  *
- * 【タイムゾーン処理】
- * - フロントエンドの datetime-local は "YYYY-MM-DDTHH:mm" 形式で値を返す (TZ なし)
- * - フロントエンドで "+09:00" サフィックスを付与して JST であることを明示して送信する
- * - GAS 側では "+09:00" 付きの ISO 文字列を new Date() でパースすることで
- *   UTC への変換が正確に行われる
- * - 結果の表示は Utilities.formatDate(..., 'Asia/Tokyo', ...) で JST に変換
- *
- * @param {string[]} emails      - ユーザーのメールアドレス配列
- * @param {string}   fromTimeIso - 検索開始日時 ISO 文字列 (例: "2026-03-25T09:00+09:00")
- * @param {string}   toTimeIso   - 検索終了日時 ISO 文字列 (例: "2026-03-25T18:00+09:00")
+ * @param {string[]} emails     - メールアドレス配列
+ * @param {string}   fromDate   - 検索開始日 "YYYY-MM-DD"
+ * @param {string}   toDate     - 検索終了日 "YYYY-MM-DD"
+ * @param {string}   startTime  - 毎日の開始時刻 "HH:mm"
+ * @param {string}   endTime    - 毎日の終了時刻 "HH:mm"
  * @returns {{ success: boolean, slots: Array, checkedEmails?: number, warning?: string, message?: string }}
  */
-function findCommonFreeSlots(emails, fromTimeIso, toTimeIso) {
+function findCommonFreeSlots(emails, fromDate, toDate, startTime, endTime) {
   try {
     if (!emails || emails.length === 0) {
       return { success: false, slots: [], message: 'メールアドレスが指定されていません。' };
     }
+    if (!fromDate || !toDate || !startTime || !endTime) {
+      return { success: false, slots: [], message: '日付・時刻が入力されていません。' };
+    }
+    if (startTime >= endTime) {
+      return { success: false, slots: [], message: '開始時刻は終了時刻より前に設定してください。' };
+    }
 
-    // フロントエンドから送られた ISO 文字列を Date オブジェクトに変換
-    // "+09:00" サフィックスが付いていれば UTC への変換が正確に行われる
-    const fromTime = new Date(fromTimeIso);
-    const toTime   = new Date(toTimeIso);
+    // 全期間の FreeBusy クエリ用範囲
+    const rangeStart = new Date(fromDate + 'T' + startTime + ':00+09:00');
+    const rangeEnd   = new Date(toDate   + 'T' + endTime   + ':00+09:00');
 
-    if (isNaN(fromTime.getTime()) || isNaN(toTime.getTime())) {
+    if (isNaN(rangeStart.getTime()) || isNaN(rangeEnd.getTime())) {
       return { success: false, slots: [], message: '日時の形式が無効です。' };
     }
-    if (fromTime >= toTime) {
-      return { success: false, slots: [], message: '開始日時は終了日時より前に設定してください。' };
+    if (rangeStart >= rangeEnd) {
+      return { success: false, slots: [], message: '開始日は終了日より前に設定してください。' };
     }
 
-    // Calendar FreeBusy API クエリ
+    // FreeBusy API を全期間で一度だけ呼び出す
     const requestBody = {
-      timeMin:  fromTime.toISOString(),
-      timeMax:  toTime.toISOString(),
+      timeMin:  rangeStart.toISOString(),
+      timeMax:  rangeEnd.toISOString(),
       timeZone: 'Asia/Tokyo',
       items:    emails.map(email => ({ id: email }))
     };
@@ -711,28 +712,23 @@ function findCommonFreeSlots(emails, fromTimeIso, toTimeIso) {
     const freeBusyResponse = Calendar.Freebusy.query(requestBody);
     const calendars = freeBusyResponse.calendars || {};
 
-    // 全ユーザーのビジースロットを収集
     const allBusySlots = [];
     const errors = [];
 
     emails.forEach(email => {
       const calData = calendars[email];
       if (!calData) return;
-
-      // アクセスエラー (カレンダーが非公開など)
       if (calData.errors && calData.errors.length > 0) {
         errors.push(email + ': ' + calData.errors.map(e => e.reason).join(', '));
         return;
       }
-
       (calData.busy || []).forEach(slot => {
         allBusySlots.push({ start: new Date(slot.start), end: new Date(slot.end) });
       });
     });
 
-    // ビジースロットを時系列ソートし、重複区間をマージ
+    // ビジースロットをソート・マージ
     allBusySlots.sort((a, b) => a.start - b.start);
-
     const mergedBusy = [];
     allBusySlots.forEach(slot => {
       if (mergedBusy.length === 0) {
@@ -740,7 +736,6 @@ function findCommonFreeSlots(emails, fromTimeIso, toTimeIso) {
       } else {
         const last = mergedBusy[mergedBusy.length - 1];
         if (slot.start <= last.end) {
-          // 区間オーバーラップ: 終了時刻を延長
           if (slot.end > last.end) last.end = slot.end;
         } else {
           mergedBusy.push({ start: slot.start, end: slot.end });
@@ -748,39 +743,42 @@ function findCommonFreeSlots(emails, fromTimeIso, toTimeIso) {
       }
     });
 
-    // ビジー区間の補集合 = 空き時間スロット
+    // 日ごとに [startTime, endTime] 内の空き時間を計算
     const freeSlots = [];
-    let cursor = fromTime;
+    const dates = getDateRange_(fromDate, toDate);
 
-    mergedBusy.forEach(busy => {
-      if (cursor < busy.start) {
-        freeSlots.push({ start: new Date(cursor), end: new Date(busy.start) });
+    dates.forEach(dateStr => {
+      const dayStart = new Date(dateStr + 'T' + startTime + ':00+09:00');
+      const dayEnd   = new Date(dateStr + 'T' + endTime   + ':00+09:00');
+      let cursor = dayStart;
+
+      mergedBusy.forEach(busy => {
+        if (busy.end <= dayStart || busy.start >= dayEnd) return;
+        const clippedStart = busy.start < dayStart ? dayStart : busy.start;
+        const clippedEnd   = busy.end   > dayEnd   ? dayEnd   : busy.end;
+        if (cursor < clippedStart) {
+          freeSlots.push({ start: new Date(cursor), end: new Date(clippedStart) });
+        }
+        if (clippedEnd > cursor) cursor = clippedEnd;
+      });
+
+      if (cursor < dayEnd) {
+        freeSlots.push({ start: new Date(cursor), end: new Date(dayEnd) });
       }
-      if (busy.end > cursor) cursor = busy.end;
     });
 
-    // 最終ビジースロット以降の残り空き時間
-    if (cursor < toTime) {
-      freeSlots.push({ start: new Date(cursor), end: new Date(toTime) });
-    }
-
-    // JST (Asia/Tokyo) で表示用ラベルを生成
+    // JST 表示用ラベルを生成
     const formattedSlots = freeSlots.map(slot => {
-      const startDateJst = Utilities.formatDate(slot.start, 'Asia/Tokyo', 'MM/dd');
-      const endDateJst   = Utilities.formatDate(slot.end,   'Asia/Tokyo', 'MM/dd');
+      const startDateJst = Utilities.formatDate(slot.start, 'Asia/Tokyo', 'MM/dd (E)');
+      const endDateJst   = Utilities.formatDate(slot.end,   'Asia/Tokyo', 'MM/dd (E)');
       const startTimeJst = Utilities.formatDate(slot.start, 'Asia/Tokyo', 'HH:mm');
       const endTimeJst   = Utilities.formatDate(slot.end,   'Asia/Tokyo', 'HH:mm');
 
-      // 同日なら日付を1回だけ表示、日をまたぐ場合は両端に日付を付ける
       const label = startDateJst === endDateJst
         ? startDateJst + '  ' + startTimeJst + ' - ' + endTimeJst + ' (JST)'
         : startDateJst + ' ' + startTimeJst + ' - ' + endDateJst + ' ' + endTimeJst + ' (JST)';
 
-      return {
-        label:    label,
-        startIso: slot.start.toISOString(),
-        endIso:   slot.end.toISOString()
-      };
+      return { label: label, startIso: slot.start.toISOString(), endIso: slot.end.toISOString() };
     });
 
     const result = { success: true, slots: formattedSlots, checkedEmails: emails.length };
@@ -793,4 +791,23 @@ function findCommonFreeSlots(emails, fromTimeIso, toTimeIso) {
     Logger.log('findCommonFreeSlots error: ' + e.message);
     return { success: false, slots: [], message: 'エラー: ' + e.message };
   }
+}
+
+/**
+ * fromDate から toDate までの "YYYY-MM-DD" 配列を返す
+ */
+function getDateRange_(fromDate, toDate) {
+  const dates = [];
+  const fp = fromDate.split('-').map(Number);
+  const tp = toDate.split('-').map(Number);
+  let cur = new Date(Date.UTC(fp[0], fp[1] - 1, fp[2]));
+  const end = new Date(Date.UTC(tp[0], tp[1] - 1, tp[2]));
+  while (cur <= end) {
+    const y = cur.getUTCFullYear();
+    const m = String(cur.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(cur.getUTCDate()).padStart(2, '0');
+    dates.push(y + '-' + m + '-' + d);
+    cur = new Date(cur.getTime() + 86400000);
+  }
+  return dates;
 }
