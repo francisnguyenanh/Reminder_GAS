@@ -550,33 +550,64 @@ function triggerReAuthorization() {
 }
 
 /**
- * Google Chat スペースのメンバー一覧を取得し、メールアドレスの配列を返す。
+ * Build a map of { userId -> { email, displayName } } by scanning the Workspace directory
+ * via people:listDirectoryPeople. Called once per getSpaceMembers invocation.
+ */
+function buildDirectoryEmailMap() {
+  const token = ScriptApp.getOAuthToken();
+  const emailMap = {};
+  let pageToken = '';
+  do {
+    const url = 'https://people.googleapis.com/v1/people:listDirectoryPeople'
+      + '?readMask=names,emailAddresses,metadata'
+      + '&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE'
+      + '&pageSize=1000'
+      + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    const res = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+    if (res.getResponseCode() !== 200) {
+      Logger.log('[buildDirectoryEmailMap] HTTP ' + res.getResponseCode() + ': ' + res.getContentText().substring(0, 300));
+      break;
+    }
+    const data = JSON.parse(res.getContentText());
+    Logger.log('[buildDirectoryEmailMap] page people count: ' + (data.people || []).length);
+    (data.people || []).forEach(p => {
+      const id = p.resourceName.replace('people/', '');
+      const emailObj = (p.emailAddresses || []).find(e => e.metadata && e.metadata.primary)
+                     || (p.emailAddresses || [])[0];
+      const nameObj  = (p.names || []).find(n => n.metadata && n.metadata.primary)
+                     || (p.names || [])[0];
+      if (emailObj) emailMap[id] = { email: emailObj.value, displayName: nameObj ? nameObj.displayName : null };
+    });
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  Logger.log('[buildDirectoryEmailMap] total mapped: ' + Object.keys(emailMap).length);
+  return emailMap;
+}
+
+/**
+ * Google Chat スペースのメンバー一覧を取得し、 chi tiết thông tin Member.
  *
- * Chat API は member.name = "users/{numericId}" を返すため、
- * People API REST エンドポイント (UrlFetchApp) で数値 ID → メールを解決する。
- * People API が 403 の場合は displayName を含む members 配列と
- * emailResolutionFailed フラグを返してフロントエンドで手動入力できるようにする。
- *
- * @param {string} spaceId - スペース ID (例: "spaces/XXXXXXX" または "XXXXXXX")
- * @returns {{ success: boolean, emails: string[], members: Array, emailResolutionFailed?: boolean, message?: string }}
+ * @param {string} spaceId - スペース ID (例: "spaces/XXXXXXX")
+ * @returns {{ success: boolean, members: Array, message?: string }}
  */
 function getSpaceMembers(spaceId) {
   try {
     if (!spaceId || !spaceId.trim()) {
-      return { success: false, emails: [], members: [], message: 'Space ID を入力してください。' };
+      return { success: false, members: [], message: 'Space ID を入力してください。' };
     }
 
-    // "spaces/" プレフィックスの正規化
     const normalizedId = spaceId.trim().startsWith('spaces/')
       ? spaceId.trim()
       : 'spaces/' + spaceId.trim();
 
-    // Step 1: Chat API でメンバーの userId と displayName を収集
-    const directEmails = [];
-    const userIds = [];
-    const membersList = []; // { userId, displayName } の配列
+    const membersList = [];
     let pageToken = null;
+    const emailMap = buildDirectoryEmailMap();
 
+    // Step 1: Chat API でメンバー一覧を取得し、Directory Map で名前・メールを解決
     do {
       const params = { pageSize: 100 };
       if (pageToken) params.pageToken = pageToken;
@@ -585,16 +616,27 @@ function getSpaceMembers(spaceId) {
       (response.memberships || []).forEach(m => {
         if (!m.member || m.member.type !== 'HUMAN' || !m.member.name) return;
 
-        const userId      = m.member.name.replace('users/', '');
-        const displayName = m.member.displayName || userId;
-        membersList.push({ userId, displayName });
+        const rawName  = m.member.name;                     // "users/104598..."
+        const userId   = rawName.replace('users/', '');
 
-        // 一部の設定では既にメールアドレスが返る
-        if (userId.includes('@')) {
-          directEmails.push(userId);
+        let displayName = m.member.displayName || null;
+        let email       = m.member.email       || '';
+
+        // Directory Map で名前・メールを解決
+        const mapped = emailMap[userId];
+        if (mapped) {
+          email       = mapped.email       || email;
+          displayName = mapped.displayName || displayName;
+          Logger.log('[DirectoryMap] ' + userId + ' -> ' + email);
         } else {
-          userIds.push(userId);
+          Logger.log('[DirectoryMap] Not found for userId: ' + userId);
         }
+
+        membersList.push({
+          id:          userId,
+          displayName: displayName || 'Unknown User',
+          email:       email
+        });
       });
 
       pageToken = response.nextPageToken;
@@ -602,117 +644,27 @@ function getSpaceMembers(spaceId) {
 
     if (membersList.length === 0) {
       return {
-        success: false, emails: [], members: [],
-        message: 'スペースに HUMAN メンバーが見つかりませんでした。Space ID を確認してください。'
+        success: false, members: [],
+        message: 'スペースに HUMAN メンバーが見つかりませんでした。'
       };
     }
 
-    // Step 2: People API REST で数値 userId → メールを解決 (Admin 権限不要)
-    const { emails: resolvedEmails, errorDetail } = resolveEmailsViaPeopleApi_(userIds);
-    const emails = [...directEmails, ...resolvedEmails];
+    Logger.log('[getSpaceMembers] Final membersList: ' + JSON.stringify(membersList));
 
-    if (emails.length === 0) {
-      // People API が失敗したが Chat API のメンバー情報は取得できた → 手動入力フォールバックへ
-      return {
-        success: true,
-        emails: [],
-        members: membersList,
-        emailResolutionFailed: true,
-        message: errorDetail && errorDetail.includes('403')
-          ? 'directory.readonly スコープの認証が必要か、組織のポリシーで制限されています。'
-          : 'People API エラー: ' + (errorDetail || 'メールアドレスフィールドが空でした。')
-      };
-    }
-
-    return { success: true, emails: emails, members: membersList };
+    return {
+      success: true,
+      members: membersList,
+      emails:  membersList.map(m => m.email).filter(Boolean)
+    };
 
   } catch (e) {
     Logger.log('getSpaceMembers error: ' + e.message);
-    const isPermErr = e.message.includes('PERMISSION_DENIED') || e.message.includes('403');
     return {
       success: false,
-      emails: [],
       members: [],
-      message: isPermErr
-        ? 'Chat API へのアクセス権限がありません。スコープ chat.memberships.readonly を確認してください。'
-        : 'エラー: ' + e.message
+      message: 'エラー: ' + e.message
     };
   }
-}
-
-/**
- * People API v1 REST (batchGet) で数値ユーザー ID → メールアドレスを解決する。
- *
- * Advanced Service (People.People) の代わりに UrlFetchApp を使用することで
- * GAS エディタでの手動サービス登録が不要になる。
- * スコープ directory.readonly があれば同 Workspace ドメイン内ユーザーを参照可能。
- *
- * @param {string[]} userIds - Chat API から取得した数値ユーザー ID の配列
- * @returns {{ emails: string[], errorDetail: string|null }}
- */
-function resolveEmailsViaPeopleApi_(userIds) {
-  if (!userIds.length) return { emails: [], errorDetail: null };
-
-  const token  = ScriptApp.getOAuthToken();
-  const idSet  = new Set(userIds);          // 探索対象の数値 ID セット
-  const idMap  = {};                        // numericId → email
-  let pageToken   = null;
-  let errorDetail = null;
-
-  // people:listDirectoryPeople を使う理由:
-  //   batchGet + READ_SOURCE_TYPE_DOMAIN_CONTACT は「組織連絡先カード」を参照するため
-  //   emailAddresses が空になるケースがある。
-  //   listDirectoryPeople + DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE は
-  //   Workspace ログインプロファイルを参照するため、プライマリメールが確実に取得できる。
-  //   必要スコープ: directory.readonly のみ (Admin 権限不要)
-  do {
-    let url = 'https://people.googleapis.com/v1/people:listDirectoryPeople'
-            + '?readMask=emailAddresses'
-            + '&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE'
-            + '&pageSize=1000';
-    if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);
-
-    try {
-      const res  = UrlFetchApp.fetch(url, {
-        headers: { Authorization: 'Bearer ' + token },
-        muteHttpExceptions: true
-      });
-      const code = res.getResponseCode();
-      const body = res.getContentText();
-
-      if (code !== 200) {
-        errorDetail = 'HTTP ' + code + ': ' + body.substring(0, 400);
-        Logger.log('listDirectoryPeople error: ' + errorDetail);
-        break;
-      }
-
-      const data = JSON.parse(body);
-      (data.people || []).forEach(person => {
-        // resourceName = "people/{numericId}"
-        const id = (person.resourceName || '').replace('people/', '');
-        if (!idSet.has(id)) return; // 対象外はスキップ
-
-        const emailField =
-          (person.emailAddresses || []).find(e => e.metadata && e.metadata.primary)
-          || (person.emailAddresses || [])[0];
-        if (emailField && emailField.value) idMap[id] = emailField.value;
-      });
-
-      pageToken = data.nextPageToken || null;
-
-      // 全対象ユーザーのメールが揃ったら早期終了
-      if (Object.keys(idMap).length >= idSet.size) break;
-
-    } catch (e) {
-      errorDetail = e.message;
-      Logger.log('listDirectoryPeople fetch error: ' + e.message);
-      break;
-    }
-  } while (pageToken);
-
-  // 元の順序でメールアドレスを返す (見つからない ID はスキップ)
-  const emails = userIds.map(id => idMap[id]).filter(Boolean);
-  return { emails, errorDetail };
 }
 
 /**

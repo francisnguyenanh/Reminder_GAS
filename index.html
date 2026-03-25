@@ -856,12 +856,15 @@
               showAlert('メンバー名を取得しました。メールアドレスを手動入力してください。', 'warning');
               return;
             }
-            renderMemberSection(res.emails);
-            showAlert(res.emails.length + ' 人のメンバーを取得しました。', 'success');
+            console.log('[DEBUG] getSpaceMembers response:', JSON.stringify(res, null, 2));
+            console.log('[DEBUG] members[0]:', JSON.stringify(res.members && res.members[0]));
+            renderMemberSection(res.members);
+            showAlert(res.members.length + ' 人のメンバーを取得しました。', 'success');
           })
           .withFailureHandler(function(err) {
             btn.disabled = false;
             spinner.style.display = 'none';
+            console.error('[DEBUG] getSpaceMembers failure:', err);
             showAlert('接続エラー: ' + (err && err.message ? err.message : err), 'danger');
           })
           .getSpaceMembers(spaceId);
@@ -870,17 +873,18 @@
       /**
        * メンバー一覧 UI の描画
        */
-      function renderMemberSection(emails) {
+      function renderMemberSection(members) {
         document.getElementById('ft_manualSection').classList.add('d-none');
         const section = document.getElementById('ft_memberSection');
         const list    = document.getElementById('ft_memberList');
-        if (!emails || emails.length === 0) {
+        if (!members || members.length === 0) {
           section.classList.add('d-none');
           return;
         }
-        list.innerHTML = emails.map(function(e, i) {
+        list.innerHTML = members.map(function(m) {
+          const label = m.displayName ? escHtml(m.displayName) + ' (' + escHtml(m.email) + ')' : escHtml(m.email);
           return '<span class="badge bg-secondary me-1 mb-1"><i class="bi bi-person-fill me-1"></i>' +
-                 escHtml(e) + '</span>';
+                 label + '</span>';
         }).join('');
         section.classList.remove('d-none');
       }
@@ -891,7 +895,8 @@
         const hint = document.getElementById('ft_memberHint');
         hint.innerHTML = '<small class="text-muted fw-bold">チャットスペースのメンバー (' + (members ? members.length : 0) + '人):</small><br>' +
           (members || []).map(function(m) {
-            return '<span class="badge bg-light text-dark border me-1 mb-1">' + escHtml(m.displayName || m.userId) + '</span>';
+            const label = (m.displayName || m.userId) + (m.email ? ' <' + m.email + '>' : '');
+            return '<span class="badge bg-light text-dark border me-1 mb-1 text-truncate" style="max-width:260px">' + escHtml(label) + '</span>';
           }).join('');
         document.getElementById('ft_manualSection').classList.remove('d-none');
       }
@@ -986,8 +991,8 @@
               return;
             }
 
-            renderMemberSection(memberRes.emails);
-            showAlert(memberRes.emails.length + ' 人の空き時間を確認中...', 'info');
+            renderMemberSection(memberRes.members);
+            showAlert(memberRes.members.length + ' 人の空き時間を確認中...', 'info');
 
             // Step 2: FreeBusy クエリで共通空き時間を取得
             google.script.run
