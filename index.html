@@ -177,6 +177,14 @@
             </a>
           </li>
 
+          <!-- ▼▼▼ 共通空き時間検索 ▼▼▼ -->
+          <li>
+            <a id="menu-freetime" onclick="showPage('freetime')">
+              <span class="menu-icon"><i class="bi bi-calendar2-check text-success"></i></span>
+              <span class="menu-label">空き時間検索</span>
+            </a>
+          </li>
+
           <!-- ▼▼▼ 将来追加する機能はここに追加 ▼▼▼ -->
           <li class="disabled">
             <a>
@@ -453,6 +461,94 @@
 
         </div><!-- /page-notebooklm -->
 
+        <!-- ========== PAGE: 共通空き時間検索 ========== -->
+        <div class="page-section" id="page-freetime">
+
+          <!-- Search input card -->
+          <div class="card shadow-sm mb-4">
+            <div class="card-header text-white d-flex align-items-center" style="background:#198754;">
+              <i class="bi bi-calendar2-check me-2"></i>
+              <span class="fw-bold">共通空き時間検索</span>
+            </div>
+            <div class="card-body">
+              <p class="text-muted small mb-3">
+                Google Chat スペースのメンバー全員の共通空き時間を検索します。<br>
+                <strong>必要な権限:</strong> Chat API・Calendar API・Admin Directory API の有効化と OAuth スコープの承認が必要です。
+              </p>
+              <div class="row g-3">
+                <div class="col-12">
+                  <label class="form-label fw-bold">Chat Space ID <span class="text-danger">*</span></label>
+                  <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-chat-dots"></i></span>
+                    <input type="text" class="form-control font-monospace" id="ft_spaceId"
+                           placeholder="例: spaces/XXXXXXX または XXXXXXX">
+                  </div>
+                  <small class="text-muted">Google Chat のスペース URL に含まれる ID を入力してください。</small>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-bold">検索開始日時 (JST) <span class="text-danger">*</span></label>
+                  <input type="datetime-local" class="form-control form-control-sm" id="ft_fromTime">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label fw-bold">検索終了日時 (JST) <span class="text-danger">*</span></label>
+                  <input type="datetime-local" class="form-control form-control-sm" id="ft_toTime">
+                </div>
+              </div>
+
+              <div class="mt-3 d-flex gap-2 flex-wrap align-items-center">
+                <button class="btn btn-success" id="ft_searchBtn" onclick="runFreeTimeSearch()">
+                  <i class="bi bi-search"></i> 空き時間を検索
+                  <span class="spinner-border spinner-border-sm" id="ft_searchSpinner" style="display:none;"></span>
+                </button>
+                <button class="btn btn-outline-secondary" id="ft_memberBtn" onclick="fetchSpaceMembers()">
+                  <i class="bi bi-people"></i> メンバー確認のみ
+                  <span class="spinner-border spinner-border-sm" id="ft_memberSpinner" style="display:none;"></span>
+                </button>
+              </div>
+
+              <!-- Member preview -->
+              <div id="ft_memberSection" class="mt-3 d-none">
+                <label class="form-label fw-bold">取得メンバー</label>
+                <div id="ft_memberList"
+                     class="border rounded p-3 bg-light"
+                     style="font-size:0.85rem; max-height:160px; overflow-y:auto;"></div>
+              </div>
+
+              <!-- Manual email fallback (shown when People API 403) -->
+              <div id="ft_manualSection" class="mt-3 d-none">
+                <div class="alert alert-warning py-2 mb-2">
+                  <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                  <span id="ft_manualMessage"></span>
+                  <div class="mt-1 small text-muted">メンバーの表示名を参考に、下のエリアにメールアドレスを手動で入力してください。</div>
+                </div>
+                <div id="ft_memberHint" class="mb-2"></div>
+                <label class="form-label fw-bold">メールアドレス手動入力 <span class="text-danger">*</span></label>
+                <textarea class="form-control form-control-sm font-monospace" id="ft_manualEmails" rows="4"
+                  placeholder="1行に1アドレス、またはカンマ区切り&#10;例: user1@example.com&#10;user2@example.com"></textarea>
+                <div class="mt-2">
+                  <button class="btn btn-success" id="ft_manualSearchBtn" onclick="runFreeTimeWithManualEmails()">
+                    <i class="bi bi-search"></i> この内容で空き時間を検索
+                    <span class="spinner-border spinner-border-sm" id="ft_manualSpinner" style="display:none;"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Results card -->
+          <div class="card shadow-sm d-none" id="ft_resultCard">
+            <div class="card-header d-flex align-items-center gap-2">
+              <i class="bi bi-calendar-check-fill text-success"></i>
+              <span class="fw-bold">共通空き時間スロット</span>
+              <small id="ft_resultMeta" class="text-muted ms-auto"></small>
+            </div>
+            <div class="card-body">
+              <div id="ft_resultList"></div>
+            </div>
+          </div>
+
+        </div><!-- /page-freetime -->
+
         <!-- ========== 将来のページはここに追加 ==========
         <div class="page-section" id="page-report">
           <h5>レポート（近日公開）</h5>
@@ -711,6 +807,249 @@
         const menuItem = document.getElementById('menu-' + page);
         if (menuItem) menuItem.classList.add('active');
         if (page === 'notebooklm') loadNlmConfig();
+        if (page === 'freetime') initFreetimePage();
+      }
+
+      // ===== 共通空き時間検索 =====
+
+      /**
+       * フリータイム検索ページの初期化
+       * 初回表示時に datetime-local 入力のデフォルト値 (当日 09:00–18:00 JST) を設定する
+       */
+      function initFreetimePage() {
+        const fromEl = document.getElementById('ft_fromTime');
+        const toEl   = document.getElementById('ft_toTime');
+        if (fromEl.value && toEl.value) return; // 既に設定済みならスキップ
+
+        // ブラウザのローカル時刻を使って当日 09:00 / 18:00 を設定
+        // datetime-local は "YYYY-MM-DDTHH:mm" 形式を期待する
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const dateStr = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+        fromEl.value = dateStr + 'T09:00';
+        toEl.value   = dateStr + 'T18:00';
+      }
+
+      /**
+       * スペースメンバーのみを確認するボタン用
+       */
+      function fetchSpaceMembers() {
+        const spaceId = document.getElementById('ft_spaceId').value.trim();
+        if (!spaceId) { showAlert('Space ID を入力してください。', 'danger'); return; }
+
+        const btn     = document.getElementById('ft_memberBtn');
+        const spinner = document.getElementById('ft_memberSpinner');
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        showAlert('メンバー情報を取得中...', 'info');
+
+        google.script.run
+          .withSuccessHandler(function(res) {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+            if (!res.success && !res.emailResolutionFailed) {
+              showAlert('メンバー取得エラー: ' + res.message, 'danger');
+              return;
+            }
+            if (res.emailResolutionFailed) {
+              showManualEmailSection(res.members, res.message);
+              showAlert('メンバー名を取得しました。メールアドレスを手動入力してください。', 'warning');
+              return;
+            }
+            renderMemberSection(res.emails);
+            showAlert(res.emails.length + ' 人のメンバーを取得しました。', 'success');
+          })
+          .withFailureHandler(function(err) {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+            showAlert('接続エラー: ' + (err && err.message ? err.message : err), 'danger');
+          })
+          .getSpaceMembers(spaceId);
+      }
+
+      /**
+       * メンバー一覧 UI の描画
+       */
+      function renderMemberSection(emails) {
+        document.getElementById('ft_manualSection').classList.add('d-none');
+        const section = document.getElementById('ft_memberSection');
+        const list    = document.getElementById('ft_memberList');
+        if (!emails || emails.length === 0) {
+          section.classList.add('d-none');
+          return;
+        }
+        list.innerHTML = emails.map(function(e, i) {
+          return '<span class="badge bg-secondary me-1 mb-1"><i class="bi bi-person-fill me-1"></i>' +
+                 escHtml(e) + '</span>';
+        }).join('');
+        section.classList.remove('d-none');
+      }
+
+      function showManualEmailSection(members, message) {
+        document.getElementById('ft_memberSection').classList.add('d-none');
+        document.getElementById('ft_manualMessage').textContent = message || '';
+        const hint = document.getElementById('ft_memberHint');
+        hint.innerHTML = '<small class="text-muted fw-bold">チャットスペースのメンバー (' + (members ? members.length : 0) + '人):</small><br>' +
+          (members || []).map(function(m) {
+            return '<span class="badge bg-light text-dark border me-1 mb-1">' + escHtml(m.displayName || m.userId) + '</span>';
+          }).join('');
+        document.getElementById('ft_manualSection').classList.remove('d-none');
+      }
+
+      function runFreeTimeWithManualEmails() {
+        const fromRaw = document.getElementById('ft_fromTime').value;
+        const toRaw   = document.getElementById('ft_toTime').value;
+        if (!fromRaw) { showAlert('検索開始日時を入力してください。', 'danger'); return; }
+        if (!toRaw)   { showAlert('検索終了日時を入力してください。', 'danger'); return; }
+        const raw    = document.getElementById('ft_manualEmails').value;
+        const emails = raw.split(/[,\n]/).map(function(e) { return e.trim(); }).filter(function(e) { return e && e.includes('@'); });
+        if (emails.length === 0) { showAlert('有効なメールアドレスを入力してください。', 'danger'); return; }
+
+        const fromIso = fromRaw + '+09:00';
+        const toIso   = toRaw   + '+09:00';
+        const btn     = document.getElementById('ft_manualSearchBtn');
+        const spinner = document.getElementById('ft_manualSpinner');
+        const resultCard = document.getElementById('ft_resultCard');
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        resultCard.classList.add('d-none');
+        showAlert(emails.length + ' 人の空き時間を確認中...', 'info');
+
+        google.script.run
+          .withSuccessHandler(function(slotRes) {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+            if (!slotRes.success) {
+              showAlert('空き時間取得エラー: ' + slotRes.message, 'danger');
+              return;
+            }
+            if (slotRes.warning) {
+              showAlert('警告: ' + escHtml(slotRes.warning).replace(/\n/g, '<br>'), 'warning');
+            }
+            renderFreeTimeResults(slotRes);
+          })
+          .withFailureHandler(function(err) {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+            showAlert('接続エラー: ' + (err && err.message ? err.message : err), 'danger');
+          })
+          .findCommonFreeSlots(emails, fromIso, toIso);
+      }
+
+      /**
+       * 空き時間検索のメイン処理
+       * 1. getSpaceMembers でメールアドレスを取得
+       * 2. findCommonFreeSlots で共通空き時間を計算
+       * 3. 結果を表示
+       *
+       * 【日時の JST 送信】
+       * datetime-local の値は "YYYY-MM-DDTHH:mm" 形式でタイムゾーン情報がない。
+       * 日本から利用するため JST (UTC+9) として解釈し、
+       * GAS バックエンドへは "+09:00" サフィックスを付与して明示的に送信する。
+       */
+      function runFreeTimeSearch() {
+        const spaceId  = document.getElementById('ft_spaceId').value.trim();
+        const fromRaw  = document.getElementById('ft_fromTime').value;
+        const toRaw    = document.getElementById('ft_toTime').value;
+
+        if (!spaceId)  { showAlert('Space ID を入力してください。', 'danger'); return; }
+        if (!fromRaw)  { showAlert('検索開始日時を入力してください。', 'danger'); return; }
+        if (!toRaw)    { showAlert('検索終了日時を入力してください。', 'danger'); return; }
+
+        // "YYYY-MM-DDTHH:mm" → "YYYY-MM-DDTHH:mm+09:00" (JST を明示)
+        const fromIso = fromRaw + '+09:00';
+        const toIso   = toRaw   + '+09:00';
+
+        const btn     = document.getElementById('ft_searchBtn');
+        const spinner = document.getElementById('ft_searchSpinner');
+        const resultCard = document.getElementById('ft_resultCard');
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        resultCard.classList.add('d-none');
+        showAlert('メンバー情報を取得中...', 'info');
+
+        // Step 1: スペースメンバーのメールアドレス取得
+        google.script.run
+          .withSuccessHandler(function(memberRes) {
+            if (!memberRes.success && !memberRes.emailResolutionFailed) {
+              btn.disabled = false;
+              spinner.style.display = 'none';
+              showAlert('メンバー取得エラー: ' + memberRes.message, 'danger');
+              return;
+            }
+
+            if (memberRes.emailResolutionFailed) {
+              btn.disabled = false;
+              spinner.style.display = 'none';
+              showManualEmailSection(memberRes.members, memberRes.message);
+              showAlert('メンバー名を取得しました。メールアドレスを手動入力して検索してください。', 'warning');
+              return;
+            }
+
+            renderMemberSection(memberRes.emails);
+            showAlert(memberRes.emails.length + ' 人の空き時間を確認中...', 'info');
+
+            // Step 2: FreeBusy クエリで共通空き時間を取得
+            google.script.run
+              .withSuccessHandler(function(slotRes) {
+                btn.disabled = false;
+                spinner.style.display = 'none';
+
+                if (!slotRes.success) {
+                  showAlert('空き時間取得エラー: ' + slotRes.message, 'danger');
+                  return;
+                }
+
+                if (slotRes.warning) {
+                  showAlert('警告: ' + escHtml(slotRes.warning).replace(/\n/g, '<br>'), 'warning');
+                }
+
+                renderFreeTimeResults(slotRes);
+              })
+              .withFailureHandler(function(err) {
+                btn.disabled = false;
+                spinner.style.display = 'none';
+                showAlert('接続エラー: ' + (err && err.message ? err.message : err), 'danger');
+              })
+              .findCommonFreeSlots(memberRes.emails, fromIso, toIso);
+          })
+          .withFailureHandler(function(err) {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+            showAlert('接続エラー: ' + (err && err.message ? err.message : err), 'danger');
+          })
+          .getSpaceMembers(spaceId);
+      }
+
+      /**
+       * 検索結果の表示
+       */
+      function renderFreeTimeResults(slotRes) {
+        const resultCard = document.getElementById('ft_resultCard');
+        const resultList = document.getElementById('ft_resultList');
+        const resultMeta = document.getElementById('ft_resultMeta');
+
+        resultMeta.textContent = slotRes.checkedEmails + ' 人のカレンダーを確認';
+
+        if (!slotRes.slots || slotRes.slots.length === 0) {
+          resultList.innerHTML =
+            '<div class="text-center text-muted py-4">' +
+            '<i class="bi bi-calendar-x fs-3 d-block mb-2"></i>' +
+            '指定期間内に共通の空き時間が見つかりませんでした。' +
+            '</div>';
+        } else {
+          resultList.innerHTML = slotRes.slots.map(function(slot, i) {
+            return '<div class="d-flex align-items-center gap-2 py-2 border-bottom">' +
+              '<span class="badge bg-success rounded-pill">' + (i + 1) + '</span>' +
+              '<span class="fw-semibold font-monospace">' + escHtml(slot.label) + '</span>' +
+              '</div>';
+          }).join('');
+        }
+
+        resultCard.classList.remove('d-none');
+        if (!slotRes.warning) {
+          showAlert('検索完了: ' + (slotRes.slots ? slotRes.slots.length : 0) + ' 件の空きスロットが見つかりました。', 'success');
+        }
       }
 
       // --- Time entries ---

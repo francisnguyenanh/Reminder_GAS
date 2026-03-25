@@ -507,3 +507,338 @@ function copyDriveFilesToInputFolder(urlsOrIds) {
     return { success: false, message: 'エラー: ' + e.message };
   }
 }
+
+// =============================================================
+// ===== 共通空き時間検索 (Common Free Time Finder) =====
+// 必要な Advanced Services: Chat API v1, Calendar API v3 のみ
+//   People API は Advanced Service 不要 — UrlFetchApp で REST 直呼び出し
+// 必要な OAuth スコープ:
+//   - https://www.googleapis.com/auth/chat.memberships.readonly
+//   - https://www.googleapis.com/auth/calendar.readonly
+//   - https://www.googleapis.com/auth/directory.readonly
+//   - https://www.googleapis.com/auth/script.external_request
+//
+// 【初回セットアップ / スコープ追加後に必須の手順】
+//   GAS エディタ (script.google.com) で「triggerReAuthorization」関数を
+//   1回だけ手動実行してください。OAuth 承認画面が表示されたら承認します。
+// =============================================================
+
+/**
+ * 【一度だけ手動実行】新しい OAuth スコープ (directory.readonly) を承認する。
+ *
+ * GAS エディタ上部のドロップダウンで「triggerReAuthorization」を選択して ▶ 実行。
+ * 「このアプリは Google アカウントへのアクセスを求めています」という画面が
+ * 表示されたら「許可」をクリックしてください。
+ * 実行ログに ✅ が表示されれば成功です。
+ */
+function triggerReAuthorization() {
+  const token = ScriptApp.getOAuthToken();
+  const res = UrlFetchApp.fetch(
+    'https://people.googleapis.com/v1/people:listDirectoryPeople'
+    + '?readMask=emailAddresses'
+    + '&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE'
+    + '&pageSize=1',
+    { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true }
+  );
+  const code = res.getResponseCode();
+  if (code === 200) {
+    Logger.log('✅ 認証成功！directory.readonly スコープが有効です。Web App が正しく動作します。');
+  } else {
+    Logger.log('❌ HTTP ' + code + ': ' + res.getContentText().substring(0, 500));
+    Logger.log('承認画面が表示されなかった場合は、スクリプトを再デプロイしてください。');
+  }
+}
+
+/**
+ * Google Chat スペースのメンバー一覧を取得し、メールアドレスの配列を返す。
+ *
+ * Chat API は member.name = "users/{numericId}" を返すため、
+ * People API REST エンドポイント (UrlFetchApp) で数値 ID → メールを解決する。
+ * People API が 403 の場合は displayName を含む members 配列と
+ * emailResolutionFailed フラグを返してフロントエンドで手動入力できるようにする。
+ *
+ * @param {string} spaceId - スペース ID (例: "spaces/XXXXXXX" または "XXXXXXX")
+ * @returns {{ success: boolean, emails: string[], members: Array, emailResolutionFailed?: boolean, message?: string }}
+ */
+function getSpaceMembers(spaceId) {
+  try {
+    if (!spaceId || !spaceId.trim()) {
+      return { success: false, emails: [], members: [], message: 'Space ID を入力してください。' };
+    }
+
+    // "spaces/" プレフィックスの正規化
+    const normalizedId = spaceId.trim().startsWith('spaces/')
+      ? spaceId.trim()
+      : 'spaces/' + spaceId.trim();
+
+    // Step 1: Chat API でメンバーの userId と displayName を収集
+    const directEmails = [];
+    const userIds = [];
+    const membersList = []; // { userId, displayName } の配列
+    let pageToken = null;
+
+    do {
+      const params = { pageSize: 100 };
+      if (pageToken) params.pageToken = pageToken;
+
+      const response = Chat.Spaces.Members.list(normalizedId, params);
+      (response.memberships || []).forEach(m => {
+        if (!m.member || m.member.type !== 'HUMAN' || !m.member.name) return;
+
+        const userId      = m.member.name.replace('users/', '');
+        const displayName = m.member.displayName || userId;
+        membersList.push({ userId, displayName });
+
+        // 一部の設定では既にメールアドレスが返る
+        if (userId.includes('@')) {
+          directEmails.push(userId);
+        } else {
+          userIds.push(userId);
+        }
+      });
+
+      pageToken = response.nextPageToken;
+    } while (pageToken);
+
+    if (membersList.length === 0) {
+      return {
+        success: false, emails: [], members: [],
+        message: 'スペースに HUMAN メンバーが見つかりませんでした。Space ID を確認してください。'
+      };
+    }
+
+    // Step 2: People API REST で数値 userId → メールを解決 (Admin 権限不要)
+    const { emails: resolvedEmails, errorDetail } = resolveEmailsViaPeopleApi_(userIds);
+    const emails = [...directEmails, ...resolvedEmails];
+
+    if (emails.length === 0) {
+      // People API が失敗したが Chat API のメンバー情報は取得できた → 手動入力フォールバックへ
+      return {
+        success: true,
+        emails: [],
+        members: membersList,
+        emailResolutionFailed: true,
+        message: errorDetail && errorDetail.includes('403')
+          ? 'directory.readonly スコープの認証が必要か、組織のポリシーで制限されています。'
+          : 'People API エラー: ' + (errorDetail || 'メールアドレスフィールドが空でした。')
+      };
+    }
+
+    return { success: true, emails: emails, members: membersList };
+
+  } catch (e) {
+    Logger.log('getSpaceMembers error: ' + e.message);
+    const isPermErr = e.message.includes('PERMISSION_DENIED') || e.message.includes('403');
+    return {
+      success: false,
+      emails: [],
+      members: [],
+      message: isPermErr
+        ? 'Chat API へのアクセス権限がありません。スコープ chat.memberships.readonly を確認してください。'
+        : 'エラー: ' + e.message
+    };
+  }
+}
+
+/**
+ * People API v1 REST (batchGet) で数値ユーザー ID → メールアドレスを解決する。
+ *
+ * Advanced Service (People.People) の代わりに UrlFetchApp を使用することで
+ * GAS エディタでの手動サービス登録が不要になる。
+ * スコープ directory.readonly があれば同 Workspace ドメイン内ユーザーを参照可能。
+ *
+ * @param {string[]} userIds - Chat API から取得した数値ユーザー ID の配列
+ * @returns {{ emails: string[], errorDetail: string|null }}
+ */
+function resolveEmailsViaPeopleApi_(userIds) {
+  if (!userIds.length) return { emails: [], errorDetail: null };
+
+  const token  = ScriptApp.getOAuthToken();
+  const idSet  = new Set(userIds);          // 探索対象の数値 ID セット
+  const idMap  = {};                        // numericId → email
+  let pageToken   = null;
+  let errorDetail = null;
+
+  // people:listDirectoryPeople を使う理由:
+  //   batchGet + READ_SOURCE_TYPE_DOMAIN_CONTACT は「組織連絡先カード」を参照するため
+  //   emailAddresses が空になるケースがある。
+  //   listDirectoryPeople + DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE は
+  //   Workspace ログインプロファイルを参照するため、プライマリメールが確実に取得できる。
+  //   必要スコープ: directory.readonly のみ (Admin 権限不要)
+  do {
+    let url = 'https://people.googleapis.com/v1/people:listDirectoryPeople'
+            + '?readMask=emailAddresses'
+            + '&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE'
+            + '&pageSize=1000';
+    if (pageToken) url += '&pageToken=' + encodeURIComponent(pageToken);
+
+    try {
+      const res  = UrlFetchApp.fetch(url, {
+        headers: { Authorization: 'Bearer ' + token },
+        muteHttpExceptions: true
+      });
+      const code = res.getResponseCode();
+      const body = res.getContentText();
+
+      if (code !== 200) {
+        errorDetail = 'HTTP ' + code + ': ' + body.substring(0, 400);
+        Logger.log('listDirectoryPeople error: ' + errorDetail);
+        break;
+      }
+
+      const data = JSON.parse(body);
+      (data.people || []).forEach(person => {
+        // resourceName = "people/{numericId}"
+        const id = (person.resourceName || '').replace('people/', '');
+        if (!idSet.has(id)) return; // 対象外はスキップ
+
+        const emailField =
+          (person.emailAddresses || []).find(e => e.metadata && e.metadata.primary)
+          || (person.emailAddresses || [])[0];
+        if (emailField && emailField.value) idMap[id] = emailField.value;
+      });
+
+      pageToken = data.nextPageToken || null;
+
+      // 全対象ユーザーのメールが揃ったら早期終了
+      if (Object.keys(idMap).length >= idSet.size) break;
+
+    } catch (e) {
+      errorDetail = e.message;
+      Logger.log('listDirectoryPeople fetch error: ' + e.message);
+      break;
+    }
+  } while (pageToken);
+
+  // 元の順序でメールアドレスを返す (見つからない ID はスキップ)
+  const emails = userIds.map(id => idMap[id]).filter(Boolean);
+  return { emails, errorDetail };
+}
+
+/**
+ * 複数ユーザーの Google カレンダーを参照し、全員が空いている共通スロットを返す。
+ *
+ * 【タイムゾーン処理】
+ * - フロントエンドの datetime-local は "YYYY-MM-DDTHH:mm" 形式で値を返す (TZ なし)
+ * - フロントエンドで "+09:00" サフィックスを付与して JST であることを明示して送信する
+ * - GAS 側では "+09:00" 付きの ISO 文字列を new Date() でパースすることで
+ *   UTC への変換が正確に行われる
+ * - 結果の表示は Utilities.formatDate(..., 'Asia/Tokyo', ...) で JST に変換
+ *
+ * @param {string[]} emails      - ユーザーのメールアドレス配列
+ * @param {string}   fromTimeIso - 検索開始日時 ISO 文字列 (例: "2026-03-25T09:00+09:00")
+ * @param {string}   toTimeIso   - 検索終了日時 ISO 文字列 (例: "2026-03-25T18:00+09:00")
+ * @returns {{ success: boolean, slots: Array, checkedEmails?: number, warning?: string, message?: string }}
+ */
+function findCommonFreeSlots(emails, fromTimeIso, toTimeIso) {
+  try {
+    if (!emails || emails.length === 0) {
+      return { success: false, slots: [], message: 'メールアドレスが指定されていません。' };
+    }
+
+    // フロントエンドから送られた ISO 文字列を Date オブジェクトに変換
+    // "+09:00" サフィックスが付いていれば UTC への変換が正確に行われる
+    const fromTime = new Date(fromTimeIso);
+    const toTime   = new Date(toTimeIso);
+
+    if (isNaN(fromTime.getTime()) || isNaN(toTime.getTime())) {
+      return { success: false, slots: [], message: '日時の形式が無効です。' };
+    }
+    if (fromTime >= toTime) {
+      return { success: false, slots: [], message: '開始日時は終了日時より前に設定してください。' };
+    }
+
+    // Calendar FreeBusy API クエリ
+    const requestBody = {
+      timeMin:  fromTime.toISOString(),
+      timeMax:  toTime.toISOString(),
+      timeZone: 'Asia/Tokyo',
+      items:    emails.map(email => ({ id: email }))
+    };
+
+    const freeBusyResponse = Calendar.Freebusy.query(requestBody);
+    const calendars = freeBusyResponse.calendars || {};
+
+    // 全ユーザーのビジースロットを収集
+    const allBusySlots = [];
+    const errors = [];
+
+    emails.forEach(email => {
+      const calData = calendars[email];
+      if (!calData) return;
+
+      // アクセスエラー (カレンダーが非公開など)
+      if (calData.errors && calData.errors.length > 0) {
+        errors.push(email + ': ' + calData.errors.map(e => e.reason).join(', '));
+        return;
+      }
+
+      (calData.busy || []).forEach(slot => {
+        allBusySlots.push({ start: new Date(slot.start), end: new Date(slot.end) });
+      });
+    });
+
+    // ビジースロットを時系列ソートし、重複区間をマージ
+    allBusySlots.sort((a, b) => a.start - b.start);
+
+    const mergedBusy = [];
+    allBusySlots.forEach(slot => {
+      if (mergedBusy.length === 0) {
+        mergedBusy.push({ start: slot.start, end: slot.end });
+      } else {
+        const last = mergedBusy[mergedBusy.length - 1];
+        if (slot.start <= last.end) {
+          // 区間オーバーラップ: 終了時刻を延長
+          if (slot.end > last.end) last.end = slot.end;
+        } else {
+          mergedBusy.push({ start: slot.start, end: slot.end });
+        }
+      }
+    });
+
+    // ビジー区間の補集合 = 空き時間スロット
+    const freeSlots = [];
+    let cursor = fromTime;
+
+    mergedBusy.forEach(busy => {
+      if (cursor < busy.start) {
+        freeSlots.push({ start: new Date(cursor), end: new Date(busy.start) });
+      }
+      if (busy.end > cursor) cursor = busy.end;
+    });
+
+    // 最終ビジースロット以降の残り空き時間
+    if (cursor < toTime) {
+      freeSlots.push({ start: new Date(cursor), end: new Date(toTime) });
+    }
+
+    // JST (Asia/Tokyo) で表示用ラベルを生成
+    const formattedSlots = freeSlots.map(slot => {
+      const startDateJst = Utilities.formatDate(slot.start, 'Asia/Tokyo', 'MM/dd');
+      const endDateJst   = Utilities.formatDate(slot.end,   'Asia/Tokyo', 'MM/dd');
+      const startTimeJst = Utilities.formatDate(slot.start, 'Asia/Tokyo', 'HH:mm');
+      const endTimeJst   = Utilities.formatDate(slot.end,   'Asia/Tokyo', 'HH:mm');
+
+      // 同日なら日付を1回だけ表示、日をまたぐ場合は両端に日付を付ける
+      const label = startDateJst === endDateJst
+        ? startDateJst + '  ' + startTimeJst + ' - ' + endTimeJst + ' (JST)'
+        : startDateJst + ' ' + startTimeJst + ' - ' + endDateJst + ' ' + endTimeJst + ' (JST)';
+
+      return {
+        label:    label,
+        startIso: slot.start.toISOString(),
+        endIso:   slot.end.toISOString()
+      };
+    });
+
+    const result = { success: true, slots: formattedSlots, checkedEmails: emails.length };
+    if (errors.length > 0) {
+      result.warning = '以下のカレンダーへのアクセスに問題がありました:\n' + errors.join('\n');
+    }
+    return result;
+
+  } catch (e) {
+    Logger.log('findCommonFreeSlots error: ' + e.message);
+    return { success: false, slots: [], message: 'エラー: ' + e.message };
+  }
+}
